@@ -15,11 +15,11 @@ import streamlit as st
 GREEN, AMBER, RED, GREY, BLUE = "#00d395", "#f5a623", "#ff5c6c", "#8b97a5", "#5b9cf5"
 
 DARK = {
-    "surface": "#111823", "border": "#26334a", "text": "#e6edf3", "text2": "#c9d1d9", "muted": "#8b97a5",
+    "surface": "#111823", "border": "#26334a", "text": "#e6edf3", "text2": "#dbe2ea", "muted": "#b4bfcc",
     "green": "#00d395", "amber": "#f5a623", "red": "#ff5c6c", "blue": "#5b9cf5", "on_accent": "#04130d",
 }
 LIGHT = {
-    "surface": "#f4f6f9", "border": "#d0d7de", "text": "#1f2328", "text2": "#3d4650", "muted": "#5b6673",
+    "surface": "#f4f6f9", "border": "#d0d7de", "text": "#1f2328", "text2": "#2a323a", "muted": "#454f5b",
     "green": "#08795a", "amber": "#9a5b00", "red": "#c4283a", "blue": "#0a60c2", "on_accent": "#ffffff",
 }
 
@@ -57,6 +57,10 @@ def _variables(p: dict[str, str]) -> str:
 
 
 _RULES = """
+  html { font-size: 17px; }
+  [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p { color: var(--mg-muted) !important; font-size: 0.95rem !important; }
+  label p, [data-testid="stWidgetLabel"] p { color: var(--mg-text) !important; font-weight: 500; }
+  section[data-testid="stSidebar"] a, section[data-testid="stSidebar"] span { color: var(--mg-text); }
   .block-container { padding-top: 2rem; max-width: 1400px; }
   html, body, [class*="st-"] { line-height: 1.5; }
   h2 { margin-bottom: 0.2rem; }
@@ -76,7 +80,7 @@ _RULES = """
   .badge-sample { background: var(--mg-amber-bg); color: var(--mg-amber); border: 1px solid var(--mg-amber); }
   .badge-idle { background: var(--mg-muted-bg); color: var(--mg-muted); border: 1px solid var(--mg-muted); }
   .badge-sim { background: var(--mg-blue-bg); color: var(--mg-blue); border: 1px solid var(--mg-blue); }
-  .subtle { color: var(--mg-muted); font-size: 0.85rem; }
+  .subtle { color: var(--mg-muted); font-size: 0.95rem; }
   .card { background: var(--mg-surface); border: 1px solid var(--mg-border); border-radius: 10px;
     padding: 14px 16px; height: 100%; }
   .card h4 { margin: 0 0 6px 0; font-size: 0.95rem; }
@@ -85,19 +89,19 @@ _RULES = """
     align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem;
     border: 2px solid #ffffff; }
   .hero { margin-bottom: 0.6rem; }
-  .hero .lede { color: var(--mg-text2); font-size: 1.02rem; max-width: 60rem; margin-top: 2px; }
-  .hero .hint { color: var(--mg-muted); font-size: 0.85rem; margin-top: 6px; }
+  .hero .lede { color: var(--mg-text2); font-size: 1.12rem; max-width: 60rem; margin-top: 2px; }
+  .hero .hint { color: var(--mg-muted); font-size: 0.95rem; margin-top: 6px; }
   .flow { display: flex; gap: 8px; margin: 0.6rem 0 1.2rem; flex-wrap: wrap; }
   .flow .step { flex: 1 1 180px; border: 1px solid var(--mg-border); border-radius: 10px; padding: 8px 12px;
-    background: var(--mg-surface); color: var(--mg-muted); font-size: 0.82rem; }
-  .flow .step b { color: var(--mg-text2); font-size: 0.86rem; }
+    background: var(--mg-surface); color: var(--mg-text2); font-size: 0.92rem; }
+  .flow .step b { color: var(--mg-text); font-size: 0.98rem; }
   .flow .step .n { display: inline-block; width: 20px; height: 20px; border-radius: 50%; text-align: center;
     line-height: 20px; font-size: 0.72rem; font-weight: 700; margin-right: 6px;
     background: var(--mg-border); color: var(--mg-text2); }
   .flow .step.active { border-color: var(--mg-green); background: var(--mg-green-bg); color: var(--mg-text2); }
   .flow .step.active b { color: var(--mg-text); }
   .flow .step.active .n, .flow .step.done .n { background: var(--mg-green); color: var(--mg-on-accent); }
-  .callout { border-radius: 10px; padding: 10px 14px; margin: 0.4rem 0 0.8rem; font-size: 0.9rem;
+  .callout { border-radius: 10px; padding: 10px 14px; margin: 0.4rem 0 0.8rem; font-size: 1rem;
     border: 1px solid var(--mg-border); background: var(--mg-surface); color: var(--mg-text); }
   .callout b.ttl { display: block; margin-bottom: 2px; }
   .callout.action { border-color: var(--mg-amber); background: var(--mg-amber-bg); }
