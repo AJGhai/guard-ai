@@ -101,7 +101,7 @@ style.glossary()
 
 if using_demo:
     st.info(
-        "Using a demo set of changes. Pick changes on **Improve my product** or **Plan a new product** first to use your own."
+        "Using a demo set of changes. Pick changes on **Improve my product** first to use your own."
     )
 
 st.markdown("### 1. What we are asking for")
@@ -285,4 +285,3 @@ if st.button("Approve and save to outbox", type="primary"):
     st.session_state["po_saved"] = path
 if path := st.session_state.get("po_saved"):
     st.success(f"Approved and saved to `{path}`. Nothing was sent to the vendor.")
-    style.next_link("pages/3_MarginGuard.py", "Last stop: protect your margin from tariffs", "🛡️")
