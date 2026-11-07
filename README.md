@@ -329,7 +329,8 @@ SKUs that MarginGuard marks REVIEW go to a second agent, SupplierNegotiator, thr
 `request_supplier_negotiation` tool. It calculates the unit cost that restores a 60% margin
 (`tools/supplier.py`), drafts a cost-reduction email to each supplier in `data/suppliers.csv`, and
 asks a human to approve each draft. Approved drafts are written to `data/outbox/<sku>.md`; no email
-is ever sent.
+is ever sent. SupplierNegotiator runs on Claude Haiku 5.5 with low thinking (`NEGOTIATOR_MODEL` in
+`agent/run.py`); MarginGuard keeps the platform default model.
 
 ### Setup
 
@@ -347,7 +348,8 @@ python3 -m venv .venv
 
 `--reset` copies `data/store_prices.original.json` over `data/store_prices.json` and clears
 `data/outbox/` first. The run prints its event trace and asks y/n in the terminal for each proposed
-price change, then for each supplier email draft.
+price change, then for each supplier email draft. At the end it prints the elapsed time per phase,
+with approval time shown separately from agent time.
 
 ### API mode
 
@@ -478,7 +480,8 @@ minutes, or every change is rejected (ZooWork denies an unanswered approval afte
 
 `estimated_recovery` covers only the approved changes. `negotiation` holds the supplier step:
 `targets` (supplier, `current_cost`, `target_cost`, `reduction_pct` per REVIEW SKU), `written` and
-`rejected` drafts, and `emails_sent: false`.
+`rejected` drafts, and `emails_sent: false`. `timings` lists the phases with their seconds,
+plus `agent_seconds` and `human_seconds` (time spent waiting for approvals).
 
 **GET /prices**
 

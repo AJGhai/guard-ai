@@ -6,8 +6,10 @@ calc_target_cost(params, base_prices=None) with params:
     duty_old       float  current duty rate, default 0.12
     duty_new       float  scenario duty rate, default 0.37
 
-    target_cost   = price * (1 - target_margin) / (1 + duty_new)
-    reduction_pct = (target_cost - current_cost) / current_cost * 100   (negative = cheaper)
+    target_cost            = price * (1 - target_margin) / (1 + duty_new)
+    reduction_pct          = (target_cost - current_cost) / current_cost * 100   (negative = cheaper)
+    reduction_phrase       = e.g. "an 11.4% reduction" (no sign), for supplier emails
+    duty_increase_per_unit = current_cost * (duty_new - duty_old)   extra duty in $ per unit
 
 send_supplier_emails writes approved drafts to data/outbox/<sku>.md. Nothing is ever sent:
 the outbox is the only output, and the address always comes from data/suppliers.csv.
@@ -32,6 +34,14 @@ def load_suppliers() -> dict[str, dict[str, str]]:
         return {row["sku"]: row for row in csv.DictReader(f)}
 
 
+def _reduction_phrase(pct: float) -> str:
+    """'an 11.4% reduction' / 'a 9.5% reduction': article by how the number is spoken."""
+    number = f"{abs(pct):g}"
+    whole = number.split(".")[0]
+    vowel_sound = whole.startswith("8") or whole in ("11", "18")
+    return f"{'an' if vowel_sound else 'a'} {number}% reduction"
+
+
 def calc_target_cost(
     params: dict[str, Any], base_prices: dict[str, float] | None = None
 ) -> dict[str, Any]:
@@ -52,6 +62,7 @@ def calc_target_cost(
 
     current_cost = row["unit_cost"]
     target_cost = row["price"] * (1 - target_margin) / (1 + duty_new)
+    reduction_pct = round((target_cost - current_cost) / current_cost * 100, 1)
     return {
         "sku": sku,
         "name": row["name"],
@@ -66,7 +77,9 @@ def calc_target_cost(
         "current_cost": round(current_cost, 2),
         "target_cost": round(target_cost, 2),
         "reduction_per_unit": round(current_cost - target_cost, 2),
-        "reduction_pct": round((target_cost - current_cost) / current_cost * 100, 1),
+        "reduction_pct": reduction_pct,
+        "reduction_phrase": _reduction_phrase(reduction_pct),
+        "duty_increase_per_unit": round(current_cost * (duty_new - duty_old), 2),
     }
 
 

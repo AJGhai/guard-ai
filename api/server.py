@@ -204,6 +204,7 @@ async def report() -> Any:
         "exposure": ((run.plan.get("baseline") or {}).get("totals") or {}).get("exposure"),
         "estimated_recovery": ((run.apply_result or {}).get("applied_totals") or {}).get("recovery"),
         "negotiation": run.negotiation,
+        "timings": run.timings(),
     }
 
 
