@@ -27,7 +27,7 @@ from agent.sourcing import run_sourcing  # noqa: E402
 from tools.rfq import VENDORS, build_po, buyer_target, evaluate, po_text, reference_cost, write_po  # noqa: E402
 from tools.unit_economics import Inputs  # noqa: E402
 
-GREEN, AMBER, RED, GREY = style.GREEN, style.AMBER, style.RED, style.GREY
+GREEN, AMBER, RED, GREY, BLUE = style.accents()
 
 DEMO_CONTEXT: dict[str, Any] = {
     "keyword": "women linen wide leg pants",
@@ -42,17 +42,17 @@ DEMO_CONTEXT: dict[str, Any] = {
     "price_add": 4.0,
 }
 
-st.set_page_config(page_title="Supplier RFQ", page_icon=":speech_balloon:", layout="wide")
+st.set_page_config(page_title="Supplier quotes", page_icon=":speech_balloon:", layout="wide")
 style.inject()
 st.markdown(
-    f"""
+    """
     <style>
-      .chat {{ display:flex; flex-direction:column; gap:8px; padding: 6px 2px; }}
-      .msg {{ max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.85rem; line-height: 1.4; }}
-      .msg .who {{ font-size: 0.68rem; color: {GREY}; margin-bottom: 2px; letter-spacing: .04em; }}
-      .msg.buyer {{ align-self: flex-end; background: rgba(0,211,149,.16); border: 1px solid rgba(0,211,149,.4); }}
-      .msg.vendor {{ align-self: flex-start; background: #111823; border: 1px solid #1e2a3a; }}
-      .badge-sim {{ background: rgba(91,156,245,.14); color: {style.BLUE}; border: 1px solid {style.BLUE}; }}
+      .chat { display:flex; flex-direction:column; gap:8px; padding: 6px 2px; }
+      .msg { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.85rem; line-height: 1.4;
+        color: var(--mg-text); }
+      .msg .who { font-size: 0.68rem; color: var(--mg-muted); margin-bottom: 2px; letter-spacing: .04em; }
+      .msg.buyer { align-self: flex-end; background: var(--mg-green-bg); border: 1px solid var(--mg-green); }
+      .msg.vendor { align-self: flex-start; background: var(--mg-surface); border: 1px solid var(--mg-border); }
     </style>
     """,
     unsafe_allow_html=True,
@@ -90,24 +90,18 @@ ref = reference_cost(base.supplier_cost, changes)
 
 # ---------- header ----------
 
-left, right = st.columns([3, 2])
-with left:
-    st.markdown("## Supplier RFQ")
-    st.markdown(
-        '<span class="subtle">Step 2: from a better product to a purchase order. '
-        "A person approves the order. Nothing is sent.</span>",
-        unsafe_allow_html=True,
-    )
-with right:
-    st.markdown(
-        "<div style='text-align:right'><span class=\"badge badge-sim\">SIMULATED VENDORS</span> "
-        '<span class="subtle">no real messages are sent</span></div>',
-        unsafe_allow_html=True,
-    )
+style.hero(
+    "Supplier Quotes",
+    "Three vendors quote your product changes. Compare the true cost per unit, then approve one purchase order.",
+    hint="Vendors are simulated for the demo. No real message is ever sent.",
+    badge_html='<span class="badge badge-sim">SIMULATED VENDORS</span>',
+)
+style.flow_bar(3 if st.session_state.get("po_saved") else 2)
+style.glossary()
 
 if using_demo:
     st.info(
-        "Using a demo set of changes. Tick changes on the **Product to PO** page first to use your own."
+        "Using a demo set of changes. Pick changes on **Improve my product** or **Plan a new product** first to use your own."
     )
 
 st.markdown("### 1. What we are asking for")
@@ -269,7 +263,8 @@ if result.get("summary"):
 
 # ---------- 4. purchase order ----------
 
-st.markdown("### 4. Purchase order draft")
+st.markdown("### 4. Approve the order")
+st.caption("Pick the vendor, read the draft below, then approve. Approving only saves a file; nothing is sent.")
 choice = st.selectbox("Order from", [r["name"] for r in rows], index=0)
 row = next(r for r in rows if r["name"] == choice)
 if not row["eligible"]:
@@ -282,3 +277,4 @@ if st.button("Approve and save to outbox", type="primary"):
     st.session_state["po_saved"] = path
 if path := st.session_state.get("po_saved"):
     st.success(f"Approved and saved to `{path}`. Nothing was sent to the vendor.")
+    style.next_link("pages/3_MarginGuard.py", "Last stop: protect your margin from tariffs", "🛡️")

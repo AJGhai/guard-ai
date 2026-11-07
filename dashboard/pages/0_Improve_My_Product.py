@@ -42,7 +42,7 @@ from tools.rfq import VENDORS, build_po, evaluate, po_text, reference_cost, writ
 from tools.spec_sheet import build_spec_sheet, data_uri, pinned_photo_html, sample_photo  # noqa: E402
 from tools.unit_economics import EVENTS, Inputs, apply_changes, apply_event, compute  # noqa: E402
 
-GREEN, AMBER, RED, GREY = style.GREEN, style.AMBER, style.RED, style.GREY
+GREEN, AMBER, RED, GREY, BLUE = style.accents()
 LETTERS = "ABCDE"
 SAMPLE_DESCRIPTION = "Lightweight linen wide-leg pants for women, high elastic waist, beige, full length"
 RFQ_QTY, RFQ_DEADLINE = 500, 60   # the Supplier RFQ page's defaults, so it shows the same quotes
@@ -52,17 +52,17 @@ style.inject()
 st.markdown(
     """<style>
     .strip { display:flex; gap:12px; overflow-x:auto; padding:4px 2px 10px; }
-    .thumb { flex:0 0 150px; background:#111823; border:1px solid #1e2a3a; border-radius:8px; padding:8px; }
+    .thumb { flex:0 0 150px; background:var(--mg-surface); border:1px solid var(--mg-border); border-radius:8px; padding:8px; }
     .thumb img { width:100%; height:150px; object-fit:contain; background:#fff; border-radius:6px; }
-    .thumb .t { font-size:0.72rem; color:#c9d1d9; margin-top:6px; height:2.6em; overflow:hidden; }
+    .thumb .t { font-size:0.72rem; color:var(--mg-text2); margin-top:6px; height:2.6em; overflow:hidden; }
     .thumb .p { font-weight:700; margin-top:4px; }
-    .thumb .s { font-size:0.68rem; color:#6b7785; }
+    .thumb .s { font-size:0.68rem; color:var(--mg-muted); }
     .wp { margin:4px 0; font-size:0.9rem; }
-    .letter { display:inline-block; width:20px; height:20px; border-radius:50%; background:#ff5c6c;
-      color:#04130d; text-align:center; font-weight:700; font-size:0.75rem; line-height:20px; margin-right:6px; }
+    .letter { display:inline-block; width:20px; height:20px; border-radius:50%; background:var(--mg-red);
+      color:var(--mg-on-accent); text-align:center; font-weight:700; font-size:0.75rem; line-height:20px; margin-right:6px; }
     .chip { display:inline-block; margin:2px 4px 2px 0; padding:2px 9px; border-radius:999px; font-size:0.78rem; }
-    .chip-bad { background:rgba(255,92,108,.12); border:1px solid #ff5c6c; color:#ffb3bb; }
-    .chip-good { background:rgba(0,211,149,.12); border:1px solid #00d395; color:#9ff0d4; }
+    .chip-bad { background:var(--mg-red-bg); border:1px solid var(--mg-red); color:var(--mg-red); }
+    .chip-good { background:var(--mg-green-bg); border:1px solid var(--mg-green); color:var(--mg-green); }
     .cmp { margin:6px 0; } .cmp b { display:block; } .cmp .subtle { display:block; }
     </style>""",
     unsafe_allow_html=True,
@@ -104,11 +104,11 @@ with st.sidebar:
     st.markdown("### Your numbers (per unit)")
     price = st.number_input("Selling price ($)", 1.0, 500.0, 29.99, 0.5, key="sb_price")
     supplier_cost = st.number_input("Supplier cost ($)", 0.1, 500.0, 9.00, 0.25)
-    shipping = st.number_input("Shipping to Amazon ($)", 0.0, 100.0, 1.50, 0.25)
-    duty_rate = st.number_input("Duty rate (%)", 0.0, 200.0, 12.0, 1.0) / 100
-    referral = st.number_input("Amazon referral fee (%)", 0.0, 50.0, 15.0, 0.5) / 100
-    fba_fee = st.number_input("FBA fulfilment fee ($)", 0.0, 100.0, 5.40, 0.1)
-    ad_rate = st.number_input("Ad spend (% of price)", 0.0, 50.0, 10.0, 1.0) / 100
+    shipping = st.number_input("Shipping to Amazon ($)", 0.0, 100.0, 1.50, 0.25, help="Freight per unit to get stock to an Amazon warehouse.")
+    duty_rate = st.number_input("Duty rate (%)", 0.0, 200.0, 12.0, 1.0, help="Import tax as a share of the product cost. Check the rate for your product and country of origin.") / 100
+    referral = st.number_input("Amazon referral fee (%)", 0.0, 50.0, 15.0, 0.5, help="Amazon's cut of each sale. About 15% for most clothing.") / 100
+    fba_fee = st.number_input("FBA fulfilment fee ($)", 0.0, 100.0, 5.40, 0.1, help="What Amazon charges to store, pack and ship each order.")
+    ad_rate = st.number_input("Ad spend (% of price)", 0.0, 50.0, 10.0, 1.0, help="How much of each sale goes to Amazon ads.") / 100
     event_key = st.selectbox(
         "Cost event", list(EVENTS), format_func=lambda k: EVENTS[k][0],
         help="Applied before the improvements, e.g. a tariff rise on the product's origin.",
@@ -120,13 +120,14 @@ after_event = apply_event(inputs, event_key)
 
 # ---------- header ----------
 
-st.markdown("## Improve My Product")
-st.markdown(
-    '<span class="subtle">For sellers already on Amazon. The ZooWork agent reads your reviews and your '
-    "photo, ZooData shows the competitors selling the same product, and you see where you win and "
-    "where to improve.</span>",
-    unsafe_allow_html=True,
+style.hero(
+    "Improve My Product",
+    "Paste your Amazon listing and we show where you beat competitors, where you fall behind, and which "
+    "changes are worth making.",
+    hint="Start with step 1 below. Nothing is bought or sent without your approval.",
 )
+style.flow_bar(1)
+style.glossary()
 
 # ---------- 1. your product ----------
 
@@ -558,10 +559,7 @@ else:
                            mime="text/html", width="stretch")
         st.caption("Open it and print to PDF. Nothing is sent.")
     with c2:
-        try:
-            st.page_link("pages/2_Supplier_RFQ.py", label="Supplier RFQ: see the vendor chats →", icon="📦")
-        except Exception:
-            st.info("Open **Supplier RFQ** in the sidebar. Your selected changes carry over.")
+        style.next_link("pages/2_Supplier_RFQ.py", "Next: get supplier quotes (your changes carry over)", "📦")
     with st.expander("Preview the spec sheet"):
         components.html(sheet, height=620, scrolling=True)
 
@@ -579,7 +577,7 @@ if auto:
         "Profit / unit $": round(r["profit"], 2), "Margin": f"{r['margin']:.1%}", "MOQ": r["moq"],
         "Lead days": r["lead_time_days"], "Meets all": "✅" if r["eligible"] else "❌",
     } for r in auto["rows"]]), hide_index=True, width="stretch")
-    st.caption("Full chats on the **Supplier RFQ** page.")
+    st.caption("Full chats on the **Supplier quotes** page.")
     po = auto.get("po")
     if po and auto.get("approved") is None:
         st.markdown("#### ✋ Purchase order waiting for your approval")
@@ -596,4 +594,4 @@ if auto:
     elif auto.get("approved") is False:
         st.info("Purchase order rejected. Nothing was saved or sent.")
     else:
-        st.info("No vendor could make this order. Adjust the changes on Supplier RFQ.")
+        st.info("No vendor could make this order. Adjust the changes on Supplier quotes.")

@@ -1,10 +1,19 @@
+# Light and dark themes. With no forced base, Streamlit follows the computer's setting, and the viewer can
+# switch under Settings (top right menu) > Theme. Page styles read the colours in dashboard/style.py.
 [theme]
-base = "dark"
+font = "sans serif"
+
+[theme.light]
+primaryColor = "#0b8a68"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f6f9"
+textColor = "#1f2328"
+
+[theme.dark]
 primaryColor = "#00d395"
 backgroundColor = "#0a0e14"
 secondaryBackgroundColor = "#111823"
 textColor = "#e6edf3"
-font = "monospace"
 
 [browser]
 gatherUsageStats = false

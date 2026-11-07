@@ -44,13 +44,13 @@ from tools.unit_economics import (  # noqa: E402
     supplier_cost_to_hold_margin,
 )
 
-GREEN, AMBER, RED, GREY, BLUE = style.GREEN, style.AMBER, style.RED, style.GREY, style.BLUE
+GREEN, AMBER, RED, GREY, BLUE = style.accents()
 DEFAULT_KEYWORD = "women linen wide leg pants"
 
 # Where a change shows on the product photo: (x%, y%).
 REGION_XY = {"upper": (50, 20), "waist": (50, 38), "lower_body": (50, 62), "hem": (50, 88), "whole": (84, 50)}
 
-st.set_page_config(page_title="Product-to-PO", page_icon=":package:", layout="wide")
+st.set_page_config(page_title="Plan a new product", page_icon=":package:", layout="wide")
 style.inject()
 
 
@@ -118,12 +118,12 @@ with st.sidebar:
     default_price = float(listing["price"]) if listing and listing.get("price") else 29.99
     price = st.number_input("Selling price ($)", 1.0, 500.0, default_price, 0.5, key=f"price_{slot}")
     supplier_cost = st.number_input("Supplier cost ($)", 0.1, 500.0, 9.00, 0.25)
-    shipping = st.number_input("Shipping to Amazon ($)", 0.0, 100.0, 1.50, 0.25)
-    duty_rate = st.number_input("Duty rate (%)", 0.0, 200.0, 12.0, 1.0) / 100
+    shipping = st.number_input("Shipping to Amazon ($)", 0.0, 100.0, 1.50, 0.25, help="Freight per unit to get stock to an Amazon warehouse.")
+    duty_rate = st.number_input("Duty rate (%)", 0.0, 200.0, 12.0, 1.0, help="Import tax as a share of the product cost. Check the rate for your product and country of origin.") / 100
     st.caption("Enter the duty rate that applies to your product and origin. It is not looked up yet.")
-    referral = st.number_input("Amazon referral fee (%)", 0.0, 50.0, 15.0, 0.5) / 100
-    fba_fee = st.number_input("FBA fulfilment fee ($)", 0.0, 100.0, 5.40, 0.1)
-    ad_rate = st.number_input("Ad spend (% of price)", 0.0, 50.0, 10.0, 1.0) / 100
+    referral = st.number_input("Amazon referral fee (%)", 0.0, 50.0, 15.0, 0.5, help="Amazon's cut of each sale. About 15% for most clothing.") / 100
+    fba_fee = st.number_input("FBA fulfilment fee ($)", 0.0, 100.0, 5.40, 0.1, help="What Amazon charges to store, pack and ship each order.")
+    ad_rate = st.number_input("Ad spend (% of price)", 0.0, 50.0, 10.0, 1.0, help="How much of each sale goes to Amazon ads.") / 100
 
 base_inputs = Inputs(price, supplier_cost, shipping, duty_rate, referral, fba_fee, ad_rate)
 market = get_market(keyword)
@@ -131,23 +131,22 @@ today = compute(base_inputs)
 
 # ---------- header ----------
 
-left, right = st.columns([3, 2])
-with left:
-    st.markdown("## Product-to-PO")
-    st.markdown(
-        '<span class="subtle">Step 1: from a product to a better, checked product, backed by real customer '
-        "reviews. A person approves every money step.</span>",
-        unsafe_allow_html=True,
+if market["source"] == "live_zoodata":
+    badge = '<span class="badge badge-live">LIVE ZOODATA</span> <span class="subtle">Amazon listings and reviews</span>'
+else:
+    badge = (
+        '<span class="badge badge-sample">SAMPLE MARKET DATA</span> '
+        f'<span class="subtle">{html.escape(str(market.get("note", "")))}</span>'
     )
-with right:
-    if market["source"] == "live_zoodata":
-        badge = '<span class="badge badge-live">LIVE ZOODATA</span> <span class="subtle">Amazon listings and reviews</span>'
-    else:
-        badge = (
-            '<span class="badge badge-sample">SAMPLE MARKET DATA</span> '
-            f'<span class="subtle">{html.escape(str(market.get("note", "")))}</span>'
-        )
-    st.markdown(f"<div style='text-align:right'>{badge}</div>", unsafe_allow_html=True)
+style.hero(
+    "Plan a new product",
+    "Pick a product, see what real customers say about it, test what a cost change does to your profit, "
+    "and choose improvements before you order.",
+    hint="Work top to bottom. A person approves every money step.",
+    badge_html=badge,
+)
+style.flow_bar(1)
+style.glossary()
 
 if listing:
     lc1, lc2 = st.columns([1, 4])
@@ -431,6 +430,7 @@ if advice and advice["key"] == evidence_key:
             + "\n".join(f"{s['n']}. {s['supplier_ask']}" for s in selected)
         )
         st.code(rfq, language=None)
-        st.info("Next: open **Supplier RFQ** in the sidebar to get quotes from vendors. Nothing is sent from here.")
+        st.caption("Your selected changes carry over. Nothing is sent from here.")
+        style.next_link("pages/2_Supplier_RFQ.py", "Next: get quotes from three vendors", "📦")
     else:
         st.caption("Tick one or more changes above to draft the supplier request.")
