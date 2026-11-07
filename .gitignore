@@ -33,3 +33,5 @@ agent/.negotiator_agent_id
 agent/.negotiator_config_hash
 # Approved supplier email drafts (run output; never sent).
 data/outbox/
+agent/.rfq_agent_id
+agent/.rfq_config_hash

@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import sys
 from collections import defaultdict
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -259,6 +260,17 @@ if advice and advice["key"] == advice_key:
     improved_inputs = apply_changes(after_event_inputs, cost_add, price_add)
     improved = compute(improved_inputs)
 
+    # hand the chosen changes to Step 2 (Supplier RFQ page)
+    st.session_state["rfq_context"] = {
+        "keyword": keyword,
+        "changes": [
+            {k: s[k] for k in ("title", "fixes", "unit_cost_delta", "price_delta", "supplier_ask")}
+            for s in selected
+        ],
+        "inputs": asdict(after_event_inputs),
+        "price_add": price_add,
+    }
+
     st.markdown("**Result with the selected changes**")
     r1, r2, r3, r4 = st.columns(4)
     r1.metric("New price", money(improved["price"]), f"{money(price_add)} vs now", delta_color="off")
@@ -314,6 +326,6 @@ if advice and advice["key"] == advice_key:
             + "\n".join(f"{s['n']}. {s['supplier_ask']}" for s in selected)
         )
         st.code(rfq, language=None)
-        st.info("Step 2 (supplier chat and purchase order) comes next. Nothing is sent from here.")
+        st.info("Next: open **Supplier RFQ** in the sidebar to get quotes from vendors. Nothing is sent from here.")
     else:
         st.caption("Tick one or more changes above to draft the supplier request.")
