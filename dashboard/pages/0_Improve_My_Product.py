@@ -182,7 +182,9 @@ b1, b2, b3 = st.columns([1, 1.3, 1.2])
 analyze_clicked = b1.button("Analyze", type="primary", disabled=not ready, width="stretch")
 autopilot_clicked = b2.button("🚀 Autopilot to purchase order", disabled=not ready, width="stretch")
 link_asin = asin_from_text(link) if mode == "link" else None
-instant_file = run_path(link_asin) if link_asin and run_path(link_asin).exists() else DEMO_FILE
+hero_file = run_path(EXAMPLES[0]["asin"])  # the first example is the demo's hero
+instant_file = (run_path(link_asin) if link_asin and run_path(link_asin).exists()
+                else hero_file if hero_file.exists() else DEMO_FILE)
 instant_clicked = b3.button("⚡ Instant demo", disabled=not instant_file.exists(), width="stretch",
                             help="Replays a recorded real run in under a second: the one for the listing in the box "
                                  "if there is one, else the latest saved. Save one with the button below a result.")
@@ -201,6 +203,11 @@ if instant_clicked:
     if recorded_price and abs(recorded_price - price) > 0.005:
         st.session_state["pending_price"] = float(recorded_price)
         st.rerun()
+
+_loaded = st.session_state.get("improve")
+if _loaded and _loaded.get("recorded"):
+    st.success(f"✅ Instant demo loaded: {(_loaded.get('listing') or {}).get('title', 'recorded run')[:80]}. "
+               "Scroll down for the results.")
 
 
 def run_analysis(status: Any) -> dict[str, Any] | None:
