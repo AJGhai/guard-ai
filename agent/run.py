@@ -3,7 +3,7 @@
 Custom tools (all executed locally by this script):
   - load_cost_sheet       no approval   rows of data/sample_merchant_data.csv
   - calc_margins          no approval   tools/calc_margins.py
-  - get_comparables       no approval   tools/comparables.py (market/fallback_prices.json for now)
+  - get_comparables       no approval   tools/comparables.py (live ZooData, cached; sample fallback)
   - evaluate_pricing_rules no approval  tools/pricing_rules.py (REVIEW / REPRICE / ABSORB per SKU)
   - get_store_prices      no approval   data/store_prices.json
   - apply_price_changes   approval      asks y/n per change; writes only approved changes
