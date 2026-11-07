@@ -207,10 +207,13 @@ def _validate(raw: dict[str, Any], chats: dict[str, list[dict[str, str]]], vendo
 
 async def _run(
     product: str, changes: list[dict[str, Any]], ref: float, qty: int, deadline_days: int,
-    on_stage: Callable[[str], None], vendors: list[Vendor],
+    on_stage: Callable[[str], None], vendors: list[Vendor], rfq_texts: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     rfq = build_rfq(product, changes, qty, deadline_days)
-    chats: dict[str, list[dict[str, str]]] = {v.key: [{"role": "buyer", "text": rfq}] for v in vendors}
+    texts = rfq_texts or {}
+    chats: dict[str, list[dict[str, str]]] = {
+        v.key: [{"role": "buyer", "text": texts.get(v.key) or rfq}] for v in vendors
+    }
 
     async with create_zoowork_client() as client:
         agent_id = await _get_or_create_agent(client)
@@ -253,11 +256,14 @@ async def _run(
 
 
 def _scripted(
-    product: str, changes: list[dict[str, Any]], ref: float, qty: int, deadline_days: int, vendors: list[Vendor]
+    product: str, changes: list[dict[str, Any]], ref: float, qty: int, deadline_days: int, vendors: list[Vendor],
+    rfq_texts: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     chats, quotes = {}, []
     for v in vendors:
         ex = scripted_exchange(v, ref, changes, qty, deadline_days, product)
+        if (rfq_texts or {}).get(v.key):
+            ex["messages"][0]["text"] = rfq_texts[v.key]   # the message the seller approved
         chats[v.key] = ex["messages"]
         quotes.append({**ex["quote"], "verified": True})
     return {
@@ -277,19 +283,24 @@ def run_sourcing(
     use_agents: bool = True,
     on_stage: Callable[[str], None] = lambda _s: None,
     vendors: list[Vendor] | None = None,
+    rfq_texts: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Blocking. Returns {"mode", "chats", "quotes", "summary", "note"?}.
 
     vendors: who to ask (the seller's own, plus any suggested ones they signed off on). Defaults to
-    the three built-in sample vendors."""
+    the three built-in sample vendors.
+    rfq_texts: {vendor key: the first message}, as reviewed and edited by the seller. A vendor without
+    an entry gets the standard message."""
     vendors = list(vendors) if vendors else list(VENDORS)
     if not use_agents:
-        return _scripted(product, changes, ref_cost, qty, deadline_days, vendors)
+        return _scripted(product, changes, ref_cost, qty, deadline_days, vendors, rfq_texts)
     try:
         return asyncio.run(
-            asyncio.wait_for(_run(product, changes, ref_cost, qty, deadline_days, on_stage, vendors), TIMEOUT_SECONDS)
+            asyncio.wait_for(
+                _run(product, changes, ref_cost, qty, deadline_days, on_stage, vendors, rfq_texts), TIMEOUT_SECONDS
+            )
         )
     except Exception as exc:  # keep the demo alive, but say so
         note = re.sub(r"\s+", " ", f"{type(exc).__name__}: {exc}")[:200]
-        return {**_scripted(product, changes, ref_cost, qty, deadline_days, vendors),
+        return {**_scripted(product, changes, ref_cost, qty, deadline_days, vendors, rfq_texts),
                 "note": f"The agents were unavailable ({note}); showing scripted replies."}

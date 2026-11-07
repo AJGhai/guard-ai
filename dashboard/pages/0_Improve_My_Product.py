@@ -231,8 +231,15 @@ instant_file = (run_path(link_asin) if link_asin and run_path(link_asin).exists(
 instant_clicked = b2.button("⚡ Instant demo", disabled=not instant_file.exists(), width="stretch",
                             help="Replays a recorded real run in under a second: the one for the listing in the box "
                                  "if there is one, else the latest saved. Save one with the button below a result.")
-st.caption("**Analyze** reads your listing and reviews, picks the changes, gets supplier quotes and drafts the order. "
-           "It stops only for your approval. About a minute. **Instant demo** replays a recorded run.")
+auto_send = st.toggle(
+    "Fully automatic: message my vendors on my own, no review", key="auto_send",
+    help="Off (default): you read and edit each vendor message before it goes out. On: Analyze messages your "
+         "vendors for you, gets the quotes and drafts the order; you only approve the order at the end.",
+)
+st.caption(("**Analyze** reads your listing and reviews, picks the changes, messages your vendors, gets quotes and "
+            "drafts the order. About a minute." if auto_send else
+            "**Analyze** reads your listing and reviews and picks the changes. You then review and edit the vendor "
+            "messages before they are sent.") + " **Instant demo** replays a recorded run.")
 
 if instant_clicked:
     saved = load_run(instant_file)
@@ -274,7 +281,12 @@ if analyze_clicked or autopilot_clicked:
         if state is not None:
             state["key"] = run_key
             state["autopilot"] = None
-            if autopilot_clicked:
+            if not auto_send:
+                # Review mode: stop before any vendor is messaged. The drafts appear in step 5 to read and edit.
+                st.session_state["quotes_open"] = True
+                st.session_state.pop("rfq_result", None)
+                st.session_state.pop("po_saved", None)
+            if autopilot_clicked and auto_send:
                 spec = state["spec"]
                 picked = auto_select(spec["improvements"])
                 chosen = [{**spec["improvements"][i - 1], "n": i} for i in picked]
@@ -312,8 +324,9 @@ if analyze_clicked or autopilot_clicked:
                 }
                 st.session_state.pop("po_saved", None)
                 st.session_state["quotes_open"] = True   # Autopilot's quotes show in step 2 below
-            status.update(label="Done. " + ("Purchase order waiting for your approval below."
-                                             if autopilot_clicked else "Scroll down."), state="complete")
+            status.update(label="Done. " + ("Purchase order waiting for your approval below." if auto_send
+                                             else "Review the vendor messages in step 5, then send them."),
+                          state="complete")
             st.session_state["improve"] = state
             listing_price = (state.get("listing") or {}).get("price")
             if listing_price and abs(listing_price - price) > 0.005:
@@ -616,7 +629,7 @@ else:
             "price_add": price_add,
         }
         st.session_state["quotes_open"] = True
-        st.session_state["rfq_autostart"] = True   # start asking suppliers right away
+        st.session_state["rfq_autostart"] = bool(st.session_state.get("auto_send"))   # else review drafts first
         st.session_state["rfq_scroll"] = True      # and scroll down to them
     if st.session_state.get("quotes_open"):
         quotes_section.render()

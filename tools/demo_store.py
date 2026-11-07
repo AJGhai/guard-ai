@@ -21,6 +21,8 @@ EXAMPLES: list[dict[str, str]] = [
     {"label": "Linen wide-leg pants (LOMON, $25)", "asin": "B0F9KYFRB6"},
     {"label": "White canvas sneakers (FRACORA, $21)", "asin": "B08MTGC39G"},
     {"label": "Everywhere belt bag (Pander, $13)", "asin": "B0BM5PD5KB"},
+    {"label": "Beach caftan cover-up, plus size ($13)", "asin": "B08T7J9RHJ"},
+    {"label": "Flare yoga pants (FOHOFO, $14)", "asin": "B0CSYMQK6X"},
 ]
 
 

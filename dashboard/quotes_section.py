@@ -18,6 +18,7 @@ vendors_mine, vendors_source.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 from dataclasses import replace
@@ -30,7 +31,7 @@ import streamlit.components.v1 as components
 import style
 from agent.sourcing import run_sourcing
 from tools.rfq import (
-    VENDORS, Vendor, build_po, evaluate, po_text, reference_cost, vendor_message, write_message, write_po,
+    VENDORS, Vendor, build_po, build_rfq, evaluate, po_text, reference_cost, vendor_message, write_message, write_po,
 )
 from tools.unit_economics import Inputs
 
@@ -174,21 +175,43 @@ def render() -> None:
     if mine:  # custom vendor set: the quotes belong to exactly these vendors
         run_key += (tuple(v.key for v in vendors),)
 
-    # Arriving from "Continue" starts the quotes right away, unless this same request already has quotes
-    # (for example from the recorded demo).
+    # ---------- the messages to the vendors: shown, and editable, before they go out ----------
+    auto_send = bool(st.session_state.get("auto_send"))
+    st.markdown("### Messages to your vendors")
+    st.caption(
+        "Fully automatic is on: these messages go out as written, no review." if auto_send
+        else "Read and edit each message. Nothing goes out until you approve below. (Prefer no review? Turn on "
+             "**Fully automatic** at the top of the page.)"
+    )
+    drafts = {v.key: build_rfq(product, changes, int(qty), int(deadline), vendor_name=v.name) for v in vendors}
+    rfq_texts: dict[str, str] = {}
+    msg_tabs = st.tabs([v.name for v in vendors])
+    for tab, v in zip(msg_tabs, vendors):
+        with tab:
+            if v.contact:
+                st.caption(f"To: {v.contact}")
+            digest = hashlib.md5(drafts[v.key].encode()).hexdigest()[:8]   # a new draft resets the box
+            rfq_texts[v.key] = st.text_area(
+                "Message", value=drafts[v.key], height=280, label_visibility="collapsed",
+                key=f"rfq_draft_{v.key}_{digest}",
+            )
+
+    # Arriving from "Continue" with Fully automatic on starts the quotes right away, unless this same request
+    # already has quotes (for example from the recorded demo).
     autostart = st.session_state.pop("rfq_autostart", False)
     have = st.session_state.get("rfq_result")
     auto_run = autostart and not (have and have["key"] == run_key)
 
     n_new = len([v for v in vendors if v.source == "suggested"])
-    label = f"Request quotes from {len(vendors)} vendors" + (f" (incl. {n_new} you approved)" if n_new else "")
+    label = f"Approve and send to {len(vendors)} vendors (simulated)" + (f", incl. {n_new} you approved" if n_new else "")
     if st.button(label, type="primary", key="rfq_go") or auto_run:
         with st.status("Contacting vendors...", expanded=True) as status:
             def on_stage(text: str) -> None:
                 status.update(label=text)
                 st.write(text)
 
-            result = run_sourcing(product, changes, ref, int(qty), int(deadline), use_agents, on_stage, vendors)
+            result = run_sourcing(product, changes, ref, int(qty), int(deadline), use_agents, on_stage, vendors,
+                                  rfq_texts)
             status.update(label="Quotes are in", state="complete", expanded=False)
         st.session_state["rfq_result"] = {"key": run_key, "result": result}
         st.session_state.pop("po_saved", None)
@@ -196,8 +219,8 @@ def render() -> None:
 
     saved = st.session_state.get("rfq_result")
     if not saved or saved["key"] != run_key:
-        st.caption("Press the button to start. Vendors you ticked above are contacted only when you press it. "
-                   "With the agents on, it takes about 30 seconds.")
+        st.caption("Press the button to send. Vendors you ticked above are contacted only when you press it. "
+                   "With the agents on, the replies take about 30 seconds.")
         return
 
     result = saved["result"]

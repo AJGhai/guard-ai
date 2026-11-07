@@ -82,10 +82,14 @@ def declined_changes(vendor: Vendor, changes: list[dict[str, Any]]) -> list[str]
     return out
 
 
-def build_rfq(product: str, changes: list[dict[str, Any]], qty: int, deadline_days: int) -> str:
+def build_rfq(
+    product: str, changes: list[dict[str, Any]], qty: int, deadline_days: int, vendor_name: str | None = None
+) -> str:
+    """The first message to a vendor. With vendor_name it is addressed to them (the editable draft)."""
     lines = "\n".join(f"{i}. {c['supplier_ask']}" for i, c in enumerate(changes, 1))
+    greeting = f"Hello {vendor_name} team,\n\nWe are" if vendor_name else "Hello, we are"
     return (
-        f"Hello, we are an Amazon seller looking for a supplier for: {product}.\n"
+        f"{greeting} an Amazon seller looking for a supplier for: {product}.\n"
         f"We need these changes to the standard product:\n{lines}\n\n"
         f"Planned first order: {qty} units, delivered within {deadline_days} days.\n"
         "Please quote: unit price (FOB), minimum order quantity, lead time, certifications and "
