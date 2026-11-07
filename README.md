@@ -325,6 +325,12 @@ MarginGuard is a Python ZooWork agent that reprices SKUs after a tariff change. 
 change needs a human approval, and only approved changes are written to
 `data/store_prices.json`, the single source of truth for current prices.
 
+SKUs that MarginGuard marks REVIEW go to a second agent, SupplierNegotiator, through the
+`request_supplier_negotiation` tool. It calculates the unit cost that restores a 60% margin
+(`tools/supplier.py`), drafts a cost-reduction email to each supplier in `data/suppliers.csv`, and
+asks a human to approve each draft. Approved drafts are written to `data/outbox/<sku>.md`; no email
+is ever sent.
+
 ### Setup
 
 ```bash
@@ -339,8 +345,9 @@ python3 -m venv .venv
 .venv/bin/python agent/run.py --reset "Duty goes from 12% to 37% on all products. What should we do?"
 ```
 
-`--reset` copies `data/store_prices.original.json` over `data/store_prices.json` first. The run
-prints its event trace and asks y/n in the terminal for each proposed price change.
+`--reset` copies `data/store_prices.original.json` over `data/store_prices.json` and clears
+`data/outbox/` first. The run prints its event trace and asks y/n in the terminal for each proposed
+price change, then for each supplier email draft.
 
 ### API mode
 
@@ -356,11 +363,12 @@ use the starter app's shape, `{"error": "<code>"}`.
 |---|---|---|
 | POST | `/run` | Start a run. Body `{"request": "...", "reset": false}`. `202`; `409 run_in_progress` if one is running. |
 | GET | `/events?since=0` | Event trace from index `since`; `next` is the index to poll from next. |
-| GET | `/pending` | The price changes waiting for a decision, if any. |
-| POST | `/approve` | Decide every pending change. Body `{"decisions": {"<sku>": true\|false}}`. |
+| GET | `/pending` | The price changes or supplier email drafts waiting for a decision, if any. |
+| POST | `/approve` | Decide every pending item. Body `{"decisions": {"<sku>": true\|false}}`. |
 | GET | `/plan` | Per-SKU decisions, comparables, baseline and scenario totals (fills in as the run goes). |
 | GET | `/report` | Final report, applied and rejected changes, exposure, estimated recovery. `409 report_not_ready` until the run ends. |
 | GET | `/prices` | Current `data/store_prices.json`. |
+| GET | `/outbox` | Approved supplier email drafts in `data/outbox/`. None are sent. |
 
 Run status moves `running` → `awaiting_approval` → `running` → `succeeded` or `failed`.
 
@@ -394,9 +402,27 @@ Run status moves `running` → `awaiting_approval` → `running` → `succeeded`
 {
   "status": "awaiting_approval",
   "pending": true,
+  "kind": "price_changes",
+  "emails": [],
   "changes": [
     { "sku": "LP-02", "old_price": 48, "new_price": 53, "reason": "Below Pants median $64; capped at +10% to $53" },
     { "sku": "DJ-02", "old_price": 74, "new_price": 81, "reason": "Below Jackets median $82; capped at +10% to $81" }
+  ]
+}
+```
+
+During the supplier step, `kind` is `"supplier_emails"`, `changes` is empty and `emails` holds
+the drafts (addresses come from `data/suppliers.csv`). Approve them with the same `POST /approve`.
+
+```json
+{
+  "status": "awaiting_approval",
+  "pending": true,
+  "kind": "supplier_emails",
+  "changes": [],
+  "emails": [
+    { "sku": "CD-03", "supplier": "Dhaka Garments Ltd", "to": "sales@dhaka-garments.example.com",
+      "subject": "CD-03 unit-cost request — 12-month volume agreement", "body": "Dear Dhaka Garments Ltd, ..." }
   ]
 }
 ```
@@ -450,10 +476,24 @@ minutes, or every change is rejected (ZooWork denies an unanswered approval afte
 }
 ```
 
-`estimated_recovery` covers only the approved changes.
+`estimated_recovery` covers only the approved changes. `negotiation` holds the supplier step:
+`targets` (supplier, `current_cost`, `target_cost`, `reduction_pct` per REVIEW SKU), `written` and
+`rejected` drafts, and `emails_sent: false`.
 
 **GET /prices**
 
 ```json
 { "LP-01": 64, "LP-02": 53, "LP-03": 78, "CD-01": 72, "CD-02": 48, "CD-03": 64, "CD-04": 82, "DJ-01": 79, "DJ-02": 74, "DJ-03": 118 }
+```
+
+**GET /outbox**
+
+```json
+{
+  "sent": false,
+  "emails": [
+    { "sku": "CD-03", "path": "data/outbox/CD-03.md",
+      "content": "To: Dhaka Garments Ltd <sales@dhaka-garments.example.com>\nSubject: ...\nApproved: 2026-11-07 17:04 UTC (outbox only, not sent)\n\nDear Dhaka Garments Ltd, ..." }
+  ]
+}
 ```

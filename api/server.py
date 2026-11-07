@@ -1,7 +1,8 @@
 """MarginGuard HTTP API.
 
 Wraps agent/run.py so a UI can start a run, follow its events, approve or reject each price
-change, and read the plan, report and prices. One run at a time.
+change and each supplier email draft, and read the plan, report, prices and outbox. One run at a
+time.
 
 Start:
   .venv/bin/uvicorn api.server:app --port 8000
@@ -24,7 +25,8 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from agent.run import MarginGuardRun, read_prices  # noqa: E402
+from agent.run import PRICE_CHANGES, SUPPLIER_EMAILS, MarginGuardRun, read_prices  # noqa: E402
+from tools.supplier import read_outbox  # noqa: E402
 
 # The platform denies an unanswered approval after 10 minutes; give up just before that.
 APPROVAL_TIMEOUT_S = 9.5 * 60
@@ -63,6 +65,7 @@ class RunState:
         self.run: MarginGuardRun | None = None
         self.task: asyncio.Task[None] | None = None
         self.pending: list[dict[str, Any]] | None = None
+        self.pending_kind: str | None = None
         self.decision: asyncio.Future[dict[str, bool]] | None = None
         self.request: str | None = None
 
@@ -70,18 +73,20 @@ class RunState:
     def active(self) -> bool:
         return self.task is not None and not self.task.done()
 
-    async def approver(self, changes: list[dict[str, Any]]) -> dict[str, bool]:
-        """Park the changes until POST /approve answers them."""
+    async def approver(self, kind: str, changes: list[dict[str, Any]]) -> dict[str, bool]:
+        """Park the price changes or email drafts until POST /approve answers them."""
         self.pending = changes
+        self.pending_kind = kind
         self.decision = asyncio.get_running_loop().create_future()
         try:
             return await asyncio.wait_for(self.decision, APPROVAL_TIMEOUT_S)
         except asyncio.TimeoutError:
             if self.run:
-                self.run.trace("approval.timeout", "no decision; rejecting all changes")
+                self.run.trace("approval.timeout", f"no decision; rejecting all {kind}")
             return {c["sku"]: False for c in changes}
         finally:
             self.pending = None
+            self.pending_kind = None
             self.decision = None
 
 
@@ -136,10 +141,13 @@ async def events(since: int = 0) -> Any:
 
 @app.get("/pending")
 async def pending() -> Any:
+    items = state.pending or []
     return {
         "status": state.run.status if state.run else "idle",
         "pending": state.pending is not None,
-        "changes": state.pending or [],
+        "kind": state.pending_kind,
+        "changes": items if state.pending_kind == PRICE_CHANGES else [],
+        "emails": items if state.pending_kind == SUPPLIER_EMAILS else [],
     }
 
 
@@ -195,9 +203,16 @@ async def report() -> Any:
         "rejected": rejected,
         "exposure": ((run.plan.get("baseline") or {}).get("totals") or {}).get("exposure"),
         "estimated_recovery": ((run.apply_result or {}).get("applied_totals") or {}).get("recovery"),
+        "negotiation": run.negotiation,
     }
 
 
 @app.get("/prices")
 async def prices() -> Any:
     return read_prices()
+
+
+@app.get("/outbox")
+async def outbox() -> Any:
+    """Approved supplier email drafts in data/outbox/. None of them were sent."""
+    return {"sent": False, "emails": read_outbox()}
