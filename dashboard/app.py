@@ -1,4 +1,4 @@
-"""Guard AI: one page, one flow. Run it from the repo root:
+"""MargeAI: one page, one flow. Run it from the repo root:
 
     .venv/bin/streamlit run dashboard/app.py
 
@@ -13,6 +13,6 @@ from __future__ import annotations
 import streamlit as st
 
 st.navigation(
-    [st.Page("pages/0_Improve_My_Product.py", title="Guard AI", icon="🛡️", default=True)],
+    [st.Page("pages/0_Improve_My_Product.py", title="MargeAI", icon="🛡️", default=True)],
     position="hidden",
 ).run()

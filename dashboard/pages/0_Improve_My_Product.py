@@ -49,7 +49,8 @@ LETTERS = "ABCDE"
 SAMPLE_DESCRIPTION = "Lightweight linen wide-leg pants for women, high elastic waist, beige, full length"
 RFQ_QTY, RFQ_DEADLINE = 500, 60   # the Supplier RFQ page's defaults, so it shows the same quotes
 
-st.set_page_config(page_title="Guard AI", page_icon=":shield:", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="MargeAI", page_icon=str(ROOT / "dashboard" / "assets" / "margeai-logo.png"),
+                   layout="wide", initial_sidebar_state="collapsed")
 style.inject()
 st.markdown(
     """<style>
@@ -120,8 +121,7 @@ after_event = apply_event(inputs, event_key)
 
 # ---------- header ----------
 
-style.hero(
-    "Guard AI",
+style.brand_header(
     "Paste your Amazon listing. We show where you stand, what real buyers say and what to change, then get "
     "supplier quotes for those changes and prepare the order and the message to the supplier.",
     hint="You approve every money step. Nothing is ever sent to a supplier or changed on Amazon.",

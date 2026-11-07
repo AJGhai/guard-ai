@@ -18,19 +18,17 @@ DARK = {
     "surface": "#111823", "border": "#26334a", "text": "#e6edf3", "text2": "#c9d1d9", "muted": "#8b97a5",
     "green": "#00d395", "amber": "#f5a623", "red": "#ff5c6c", "blue": "#5b9cf5", "on_accent": "#04130d",
 }
+# MargeAI brand: light yellow and blue. "green" is kept for success / live states only.
 LIGHT = {
-    "surface": "#f4f6f9", "border": "#d0d7de", "text": "#1f2328", "text2": "#3d4650", "muted": "#5b6673",
-    "green": "#08795a", "amber": "#9a5b00", "red": "#c4283a", "blue": "#0a60c2", "on_accent": "#ffffff",
+    "surface": "#FFF4C9", "border": "#E9D78C", "text": "#14284B", "text2": "#2B3F66", "muted": "#5B6785",
+    "green": "#1E7B55", "amber": "#A85F00", "red": "#C4283A", "blue": "#1F5FBF", "on_accent": "#FFFFFF",
+    "yellow": "#FFE169", "yellow_soft": "#FFF4C9",
 }
 
 
 def theme_name() -> str:
-    """'light' or 'dark', as set in Streamlit's Settings menu. Falls back to dark if it is not known yet."""
-    try:
-        name = st.context.theme.type
-    except Exception:
-        name = None
-    return name if name in ("light", "dark") else "dark"
+    """MargeAI has one look: light, yellow and blue."""
+    return "light"
 
 
 def palette() -> dict[str, str]:
@@ -60,11 +58,13 @@ _RULES = """
   .block-container { padding-top: 2rem; max-width: 1400px; }
   html, body, [class*="st-"] { line-height: 1.5; }
   h2 { margin-bottom: 0.2rem; }
-  h3 { margin-top: 1.6rem; }
+  h3 { margin-top: 1.8rem; padding-bottom: 4px; border-bottom: 3px solid var(--mg-yellow); display: inline-block; }
+  h4 { color: var(--mg-text2); }
   section[data-testid="stSidebar"] h3 { font-size: 1rem; margin-top: 0.8rem; }
   button[kind="primary"] { font-weight: 700; }
   div[data-testid="stMetric"] {
-    background: var(--mg-surface); border: 1px solid var(--mg-border); border-radius: 10px; padding: 14px 16px;
+    background: var(--mg-surface); border: 1px solid var(--mg-border); border-radius: 14px; padding: 14px 16px;
+    box-shadow: 0 2px 6px rgba(20, 40, 75, 0.08);
   }
   div[data-testid="stMetricLabel"] p { color: var(--mg-muted); text-transform: uppercase;
     font-size: 0.68rem; letter-spacing: 0.05em; }
@@ -80,7 +80,7 @@ _RULES = """
   .card { background: var(--mg-surface); border: 1px solid var(--mg-border); border-radius: 10px;
     padding: 14px 16px; height: 100%; }
   .card h4 { margin: 0 0 6px 0; font-size: 0.95rem; }
-  .pin { position: absolute; transform: translate(-50%, -50%); background: var(--mg-green);
+  .pin { position: absolute; transform: translate(-50%, -50%); background: var(--mg-blue);
     color: var(--mg-on-accent); border-radius: 50%; width: 26px; height: 26px; display: flex;
     align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem;
     border: 2px solid #ffffff; }
@@ -94,15 +94,25 @@ _RULES = """
   .flow .step .n { display: inline-block; width: 20px; height: 20px; border-radius: 50%; text-align: center;
     line-height: 20px; font-size: 0.72rem; font-weight: 700; margin-right: 6px;
     background: var(--mg-border); color: var(--mg-text2); }
-  .flow .step.active { border-color: var(--mg-green); background: var(--mg-green-bg); color: var(--mg-text2); }
+  .flow .step.active { border-color: var(--mg-blue); background: var(--mg-blue-bg); color: var(--mg-text2); }
   .flow .step.active b { color: var(--mg-text); }
-  .flow .step.active .n, .flow .step.done .n { background: var(--mg-green); color: var(--mg-on-accent); }
+  .flow .step.active .n, .flow .step.done .n { background: var(--mg-blue); color: var(--mg-on-accent); }
   .callout { border-radius: 10px; padding: 10px 14px; margin: 0.4rem 0 0.8rem; font-size: 0.9rem;
     border: 1px solid var(--mg-border); background: var(--mg-surface); color: var(--mg-text); }
   .callout b.ttl { display: block; margin-bottom: 2px; }
   .callout.action { border-color: var(--mg-amber); background: var(--mg-amber-bg); }
   .callout.good { border-color: var(--mg-green); background: var(--mg-green-bg); }
   .callout.bad { border-color: var(--mg-red); background: var(--mg-red-bg); }
+  .brandbar { display: flex; align-items: center; gap: 18px; padding: 14px 20px; border-radius: 20px;
+    background: linear-gradient(135deg, var(--mg-yellow-soft) 0%, var(--mg-yellow) 100%);
+    border: 1px solid var(--mg-border); box-shadow: 0 3px 10px rgba(20, 40, 75, 0.10); margin-bottom: 0.9rem; }
+  .brandbar svg { flex: none; filter: drop-shadow(0 2px 3px rgba(20, 40, 75, 0.25)); }
+  .brandbar .wordmark { font-size: 2.3rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05;
+    color: var(--mg-text); }
+  .brandbar .wordmark span { color: var(--mg-blue); }
+  .brandbar .tagline { color: var(--mg-text2); font-size: 1rem; margin-top: 2px; }
+  div[data-testid="stExpander"] { border-radius: 12px; }
+  button[kind="primary"] { border-radius: 10px; box-shadow: 0 2px 6px rgba(31, 95, 191, 0.30); }
 """
 
 
@@ -139,6 +149,42 @@ def hero(title: str, lede: str, hint: str = "", badge_html: str = "") -> None:
     with right:
         if badge_html:
             st.markdown(f"<div style='text-align:right; margin-top:1.3rem'>{badge_html}</div>", unsafe_allow_html=True)
+    hint_html = f'<div class="hint">{hint}</div>' if hint else ""
+    st.markdown(f'<div class="hero"><div class="lede">{lede}</div>{hint_html}</div>', unsafe_allow_html=True)
+
+
+LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" width="{w}" height="{h}" role="img" '
+    'aria-label="MargeAI logo">'
+    '<rect x="2" y="2" width="96" height="116" rx="26" fill="#FFE169"/>'
+    '<g stroke="#173F86" stroke-width="2.6" stroke-linejoin="round" fill="#2F6FDB">'
+    '<path d="M24 94 C12 96 7 82 14 72 C16 82 21 85 29 84 Z"/>'
+    '<path d="M76 94 C88 96 93 82 86 72 C84 82 79 85 71 84 Z"/>'
+    '<path d="M22 98 C15 80 16 56 21 38 C26 18 37 7 50 7 C63 7 74 18 79 38 C84 56 85 80 78 98 '
+    'C70 105 30 105 22 98 Z"/></g>'
+    '<g fill="none" stroke="#9CC4FF" stroke-width="2.6" stroke-linecap="round">'
+    '<path d="M50 10 C41 22 37 38 39 56"/><path d="M50 10 C59 22 63 38 61 56"/>'
+    '<path d="M43 11 C33 23 29 40 30 58"/><path d="M57 11 C67 23 71 40 70 58"/></g>'
+    '<path d="M31 36 C33 26 39 19 45 15" fill="none" stroke="#DCEBFF" stroke-width="3.2" stroke-linecap="round"/>'
+    '<text x="50" y="79" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" '
+    'font-weight="900" font-size="13" fill="#FFFFFF" letter-spacing="0.5">MARGE</text>'
+    '<text x="50" y="94" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" '
+    'font-weight="900" font-size="15" fill="#FFE169">AI</text></svg>'
+)
+
+
+def logo_svg(height: int = 64) -> str:
+    """The MargeAI logo (an original tall blue beehive hairdo with the name inside, on a yellow badge)."""
+    return LOGO_SVG.format(w=round(height * 100 / 120), h=height)
+
+
+def brand_header(lede: str, hint: str = "") -> None:
+    """The MargeAI banner: logo, wordmark and tagline, then one plain sentence on what the page does."""
+    st.markdown(
+        f'<div class="brandbar">{logo_svg(96)}<div><div class="wordmark">Marge<span>AI</span></div>'
+        f'<div class="tagline">The AI co-pilot that minds your margin.</div></div></div>',
+        unsafe_allow_html=True,
+    )
     hint_html = f'<div class="hint">{hint}</div>' if hint else ""
     st.markdown(f'<div class="hero"><div class="lede">{lede}</div>{hint_html}</div>', unsafe_allow_html=True)
 

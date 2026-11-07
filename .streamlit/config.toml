@@ -1,19 +1,11 @@
-# Light and dark themes. With no forced base, Streamlit follows the computer's setting, and the viewer can
-# switch under Settings (top right menu) > Theme. Page styles read the colours in dashboard/style.py.
+# MargeAI brand: light yellow and blue, one look (light). Page styles read the colours in dashboard/style.py.
 [theme]
+base = "light"
+primaryColor = "#1F5FBF"
+backgroundColor = "#FFFBE8"
+secondaryBackgroundColor = "#FFF4C9"
+textColor = "#14284B"
 font = "sans serif"
-
-[theme.light]
-primaryColor = "#0b8a68"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f4f6f9"
-textColor = "#1f2328"
-
-[theme.dark]
-primaryColor = "#00d395"
-backgroundColor = "#0a0e14"
-secondaryBackgroundColor = "#111823"
-textColor = "#e6edf3"
 
 [browser]
 gatherUsageStats = false
