@@ -73,6 +73,13 @@ CONFIG_HASH_FILE = AGENT_DIR / ".agent_config_hash"
 # human approval keeps us busy); reconnect this many times in a row before giving up.
 STREAM_RECONNECTS = 5
 
+# Comparables query per cost-sheet category (also in the MarginGuard instructions).
+CATEGORY_QUERIES = {
+    "Pants": "women linen pants",
+    "Dresses": "cotton midi dress",
+    "Jackets": "women denim jacket",
+}
+
 # Approval kinds passed to an approver along with the items to decide.
 PRICE_CHANGES = "price_changes"
 SUPPLIER_EMAILS = "supplier_emails"
@@ -83,11 +90,10 @@ INSTRUCTIONS = """\
 # MarginGuard
 
 You are MarginGuard, a pricing analyst for a fashion brand facing a tariff change.
-Current prices come from the store (`get_store_prices`); the cost sheet already uses them.
+Current prices come from the store; `evaluate_pricing_rules` already uses them.
 
 ## Decision rules
-Apply these per SKU, in this order, using the tariff-scenario margin from `calc_margins`
-(`margin_new` at current prices):
+Apply these per SKU, in this order, using the tariff-scenario margin at current prices:
 a) REVIEW if tariff margin < 56%. Do not reprice it; flag it for sourcing review.
 b) Otherwise REPRICE if the current price is below the comparable median.
    New price = min(median, round(current_price * 1.10)) in whole dollars.
@@ -95,37 +101,32 @@ b) Otherwise REPRICE if the current price is below the comparable median.
 c) Otherwise ABSORB.
 
 ## Workflow
-1. Call `load_cost_sheet` for every SKU's category, unit cost, current price and monthly units.
-2. Call `calc_margins` with `prices: {}` and `volume_drop: 0` for baseline (`margin_old`) and
-   tariff-scenario (`margin_new`) margins and total `exposure`. Duty rates are decimals (12% = 0.12).
-3. Call `get_comparables` once per category. Queries: Pants -> "women linen pants",
-   Dresses -> "cotton midi dress", Jackets -> "women denim jacket".
-4. Call `evaluate_pricing_rules` with the duty rates and `medians` keyed by cost-sheet category
-   (Pants, Dresses, Jackets). It applies the decision rules above exactly; use its actions,
-   new prices and reasons as given.
-5. Recalculate the plan with `calc_margins`, passing `reprice_prices` from step 4 and
-   `volume_drop: 0.02`. Wait for this result before step 6: call `apply_price_changes` only
-   after the plan `calc_margins` has returned, never in parallel with it.
-6. If there are REPRICE items, always call `apply_price_changes` once with all of them. Do not
-   stop to ask the user whether to submit them: the tool itself asks a human to approve or
-   reject each change, and only approved changes are written. Pass
-   `scenario` with the same duty rates and volume_drop 0.02. Use each SKU's `reason` from
-   `evaluate_pricing_rules` word for word; it cites the competitor median and says when the
-   +10% cap limited the price.
-7. If any SKU is REVIEW, after `apply_price_changes` has returned (or right after step 5 when
+1. In ONE parallel batch, call `get_comparables` for all three categories: Pants ->
+   "women linen pants", Dresses -> "cotton midi dress", Jackets -> "women denim jacket".
+2. Call `evaluate_pricing_rules` with the duty rates (decimals; 12% = 0.12), `medians` keyed by
+   cost-sheet category (Pants, Dresses, Jackets) and `volume_drop: 0.02`. It applies the
+   decision rules above exactly and also returns `baseline_totals` (with `exposure`) and
+   `plan_totals` (with the full-plan `recovery`), so do not call `calc_margins` or
+   `load_cost_sheet`. Use its actions, new prices and reasons as given.
+3. If there are REPRICE items, call `apply_price_changes` once with all of them. Do not stop to
+   ask the user first: the tool asks a human to approve or reject each change, and only approved
+   changes are written. Pass `scenario` with the same duty rates and volume_drop 0.02. Use each
+   SKU's `reason` from `evaluate_pricing_rules` word for word.
+4. If any SKU is REVIEW, after `apply_price_changes` has returned (or right after step 2 when
    there are no REPRICE items), call `request_supplier_negotiation` once with all REVIEW SKUs and
-   the same duty rates. It asks each SKU's supplier for a lower unit cost; a human approves or
-   rejects each email draft, and approved drafts go to the outbox (no email is sent).
-8. After the results return, write a short report:
+   the same duty rates. A human approves or rejects each supplier email draft; approved drafts go
+   to the outbox (no email is sent).
+5. Write a concise report:
    - A per-SKU decision table: SKU, action, old price, new price, reason. For REPRICE items
      rejected by the reviewer, show the action as REJECTED and the new price as the old price.
-   - Sections: Applied, Rejected, Absorbed, Review (sourcing review), Supplier negotiation,
-     Exposure, Estimated recovery, Assumptions.
+   - Sections, one or two lines each: Applied, Rejected, Absorbed, Review (sourcing review),
+     Supplier negotiation, Exposure, Estimated recovery, Assumptions.
    - Supplier negotiation: per REVIEW SKU, the supplier, current -> target unit cost and
      reduction_pct from `request_supplier_negotiation`, and whether the email was approved
      (written to the outbox, not sent) or rejected by the reviewer.
-   - Estimated recovery is `applied_totals.recovery` from the `apply_price_changes` result,
-     which covers only the approved changes.
+   - Exposure is `baseline_totals.exposure`. Estimated recovery is `applied_totals.recovery`
+     from `apply_price_changes` (approved changes only); also give the full-plan
+     `plan_totals.recovery`.
    - Assumptions must state the comparables data source from the `data_source` field of the
      `get_comparables` results: "live_zoodata" (live ZooData) or "sample_fallback" (sample
      fallback data, not live market prices).
@@ -134,12 +135,11 @@ c) Otherwise ABSORB.
 - Never do arithmetic yourself. Every margin, price, exposure, recovery or total you report must
   come from a tool result.
 - Do not retry a rejected price change.
-- Call tools one step at a time in workflow order. Never call `calc_margins` and
-  `apply_price_changes` in parallel; the plan must be calculated before any price is written.
-  Never call `request_supplier_negotiation` in parallel with `apply_price_changes`.
+- Call `apply_price_changes` only after `evaluate_pricing_rules` has returned, and never call
+  `request_supplier_negotiation` in parallel with `apply_price_changes`.
 - Finish the whole workflow in one turn, including `apply_price_changes` and
   `request_supplier_negotiation`; never end the turn with a question about whether to submit.
-- Amounts from `calc_margins` are per month.
+- Amounts are per month.
 """
 
 NO_ARGS = {"type": "object", "properties": {}}
@@ -192,8 +192,10 @@ CUSTOM_TOOLS: list[dict[str, Any]] = [
             "Apply the MarginGuard decision rules (REVIEW / REPRICE / ABSORB) to every SKU at "
             "current store prices. Input: duty_old and duty_new as decimals, medians as "
             "{cost-sheet category: comparable median}. Returns decisions (sku, action, "
-            "current_price, new_price, median, tariff_margin, reason) and reprice_prices "
-            "{sku: new_price} for the REPRICE items."
+            "current_price, new_price, median, tariff_margin, reason), reprice_prices "
+            "{sku: new_price} for the REPRICE items, baseline_totals (calc_margins totals at "
+            "current prices, including exposure) and plan_totals (calc_margins totals with all "
+            "reprice_prices and volume_drop, including the full-plan recovery). All per month."
         ),
         "input_schema": {
             "type": "object",
@@ -201,6 +203,7 @@ CUSTOM_TOOLS: list[dict[str, Any]] = [
                 "duty_old": {"type": "number"},
                 "duty_new": {"type": "number"},
                 "medians": {"type": "object", "additionalProperties": {"type": "number"}},
+                "volume_drop": {"type": "number", "default": 0.02},
             },
             "required": ["duty_old", "duty_new", "medians"],
         },
@@ -289,32 +292,37 @@ AGENT_CONFIG: dict[str, Any] = {
 NEGOTIATOR_INSTRUCTIONS = """\
 # SupplierNegotiator
 
-You are SupplierNegotiator, writing for the sourcing team of a fashion brand. A duty increase has
-pushed some SKUs below their margin floor and the market will not bear a price increase, so you
-ask each SKU's supplier for a lower unit cost.
+You write for the sourcing team of Guard Apparel. A duty increase has raised our landed cost on
+some SKUs and the market will not bear a higher retail price, so you ask each SKU's supplier to
+share the tariff burden with a lower unit cost.
 
 ## Workflow
-1. For each SKU in the request, call `calc_target_cost` with the sku and the duty rates from the
-   request (decimals; 12% = 0.12). Keep the default target_margin of 0.60.
-2. Call `get_comparables` once per category you need. Queries: Pants -> "women linen pants",
-   Dresses -> "cotton midi dress", Jackets -> "women denim jacket".
-3. Draft one short, professional email per SKU to its `supplier`. Each email must:
-   - ask for a unit cost reduction from `current_cost` to `target_cost`, quoting `reduction_pct`;
-   - cite the duty increase from the request (for example 12% to 37%);
-   - cite the competitor `median` from `get_comparables` next to our current `price`, to show
-     that raising the retail price is not possible;
-   - state the volume we buy: `units_per_month` units per month;
-   - offer a longer commitment in return, such as a 12-month volume agreement;
-   - have a clear subject line, stay under 180 words, and be signed "Sourcing Team".
-4. Call `send_supplier_email` once with all drafts. A human approves or rejects each draft and
-   approved drafts are written to the outbox; no email is actually sent. Do not ask the user
-   before calling it, and do not retry rejected drafts.
-5. Reply with a short summary per SKU: supplier, current -> target unit cost, reduction_pct, and
-   whether the draft was approved (in the outbox, not sent) or rejected.
+1. In ONE parallel batch, call `calc_target_cost` for every SKU (with the duty rates from the
+   request, as decimals) and `get_comparables` for every query named in the request.
+2. Draft one email per SKU to its `supplier`, then call `send_supplier_email` once with all
+   drafts. A human approves or rejects each draft; approved drafts go to the outbox and nothing
+   is actually sent. Do not ask before calling it, and do not retry rejected drafts.
+3. Reply with exactly one line per SKU and nothing else: supplier, `current_cost` ->
+   `target_cost`, `reduction_phrase`, and whether the draft was approved (in the outbox, not
+   sent) or rejected.
+
+## Email rules
+- Under 120 words including the sign-off, with a clear subject line naming the SKU.
+- State the duty increase from the request (for example "from 12% to 37%") and what it adds per
+  unit: `duty_increase_per_unit` (for example "$2.80 per unit"). Do not name a country or market.
+- Ask for a unit cost of `target_cost` (down from `current_cost`) as a way to share the tariff
+  burden, and describe the change exactly as `reduction_phrase` (for example "an 11.4%
+  reduction").
+- Cite the competitor `median` from `get_comparables` next to our current `price` to show we
+  cannot raise the retail price.
+- State our volume as "We buy <units_per_month> units per month".
+- Offer a 12-month volume commitment in return.
+- Never mention our margin, a target margin, profit, or how the target cost was worked out.
+- Sign off exactly: "Sourcing Team, Guard Apparel".
 
 ## Rules
-- Never do arithmetic yourself. Every cost, percentage, price, median and volume must come from a
-  tool result, quoted as returned.
+- Never do arithmetic yourself. Quote every number as a tool returned it; write money with two
+  decimals (for example $2.80).
 - Do not invent facts that no tool returned (lead times, order history, competitor names).
 - Finish in one turn.
 """
@@ -323,10 +331,11 @@ NEGOTIATOR_TOOLS: list[dict[str, Any]] = [
     {
         "name": "calc_target_cost",
         "description": (
-            "Unit cost that restores the target margin at the current price after the duty "
-            "change: target_cost = price * (1 - target_margin) / (1 + duty_new). Returns sku, "
-            "name, category, price, units_per_month, supplier, contact_email, current_cost, "
-            "target_cost, reduction_per_unit and reduction_pct (negative = lower cost)."
+            "Target unit cost for a SKU after the duty change (calculated internally; never "
+            "mention how). Returns sku, name, category, price, units_per_month, supplier, "
+            "contact_email, current_cost, target_cost, reduction_per_unit, reduction_pct "
+            "(negative = lower cost), reduction_phrase (for example 'an 11.4% reduction') and "
+            "duty_increase_per_unit (extra duty in dollars per unit)."
         ),
         "input_schema": {
             "type": "object",
@@ -370,7 +379,12 @@ NEGOTIATOR_TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+# A fast model with low thinking: the negotiator only fills in tool numbers and writes two short
+# emails. MarginGuard keeps the platform default model chosen when it was created.
+NEGOTIATOR_MODEL = {"primary": "litellm/claude-haiku-5-5", "thinking": "low"}
+
 NEGOTIATOR_CONFIG: dict[str, Any] = {
+    "model": NEGOTIATOR_MODEL,
     "custom_tools": NEGOTIATOR_TOOLS,
     "tool_policy": {
         "permissions": {
@@ -463,6 +477,7 @@ async def terminal_approver(kind: str, items: list[dict[str, Any]]) -> dict[str,
             print(f"  To: {e['supplier']} <{e['to']}>")
             print(f"  Subject: {e['subject']}\n")
             print("\n".join("  " + line for line in e["body"].strip().splitlines()))
+            print(f"\n  ({len(e['body'].split())} words)")
             decisions[e["sku"]] = await ask_yes_no(
                 f"\n  Approve email to {e['supplier']} for {e['sku']}? [y/n] "
             )
@@ -529,14 +544,18 @@ def summarize_result(name: str, result: dict[str, Any]) -> str:
         counts: dict[str, int] = {}
         for d in result["decisions"]:
             counts[d["action"]] = counts.get(d["action"], 0) + 1
-        return f"{counts} reprice={short(result['reprice_prices'])}"
+        return (
+            f"{counts} reprice={short(result['reprice_prices'])} "
+            f"exposure={result['baseline_totals']['exposure']} plan_recovery={result['plan_totals']['recovery']}"
+        )
     if name == "apply_price_changes":
         extra = f", applied_totals {short(result['applied_totals'])}" if "applied_totals" in result else ""
         return f"applied {len(result['applied'])}, rejected {len(result['rejected'])}{extra}"
     if name == "calc_target_cost":
         return (
             f"{result['sku']}: cost {fmt(result['current_cost'])} -> {fmt(result['target_cost'])} "
-            f"({fmt(result['reduction_pct'])}%), {result['units_per_month']} units/month"
+            f"({fmt(result['reduction_pct'])}%), duty +{fmt(result['duty_increase_per_unit'])}/unit, "
+            f"{result['units_per_month']} units/month"
         )
     if name in ("send_supplier_email", "request_supplier_negotiation"):
         written = [w["sku"] for w in result.get("written", [])]
@@ -582,14 +601,16 @@ async def get_or_create_agent(
         spec.hash_file.write_text(fingerprint + "\n")
         return agent_id, "config_updated"
 
-    models = await client.list_models()
-    selectable = [m for m in models if m.get("selectable") is not False]
-    if not selectable:
-        raise RuntimeError("No selectable ZooWork model")
-    chosen = next(
-        (m for m in selectable if "model" in (m.get("default_for") or [])), selectable[0]
-    )
-    resource = {"name": spec.name, "model": {"primary": chosen["model"]}, **spec.config}
+    resource = {"name": spec.name, **spec.config}
+    if "model" not in spec.config:
+        models = await client.list_models()
+        selectable = [m for m in models if m.get("selectable") is not False]
+        if not selectable:
+            raise RuntimeError("No selectable ZooWork model")
+        chosen = next(
+            (m for m in selectable if "model" in (m.get("default_for") or [])), selectable[0]
+        )
+        resource["model"] = {"primary": chosen["model"]}
     created = await client.create_agent(resource, idempotency_key=f"{spec.name}-agent-v1")
     agent_id = created["agent_id"]
     spec.id_file.write_text(agent_id + "\n")
@@ -609,6 +630,7 @@ class AgentSession:
     APPROVAL_TOOL = ""
     APPROVAL_KIND = ""
     TRACE_PREFIX = ""
+    AFTER_REVIEW_PHASE = ""
 
     def __init__(
         self, approver: Approver, echo: bool = False, parent: AgentSession | None = None
@@ -623,6 +645,8 @@ class AgentSession:
         self.report_parts: list[str] = []
         self.reviewed: dict[str, bool] = {}
         self._start = time.monotonic()
+        self.phases: list[dict[str, Any]] = []
+        self._phase: tuple[str, float] | None = None
 
     @property
     def report(self) -> str:
@@ -640,6 +664,37 @@ class AgentSession:
     def set_status(self, status: str) -> None:
         (self.parent or self).status = status
 
+    def phase(self, name: str | None) -> None:
+        """Close the current timing phase and start `name` (None just closes it).
+
+        Phases named "approval: ..." are human time and are excluded from agent time.
+        """
+        if self.parent is not None:
+            self.parent.phase(name)
+            return
+        now = time.monotonic()
+        if self._phase is not None:
+            label, started = self._phase
+            self.phases.append({
+                "phase": label,
+                "seconds": round(now - started, 1),
+                "human": label.startswith("approval:"),
+            })
+        self._phase = (name, now) if name else None
+
+    def timings(self) -> dict[str, Any]:
+        agent = sum(p["seconds"] for p in self.phases if not p["human"])
+        human = sum(p["seconds"] for p in self.phases if p["human"])
+        return {"phases": self.phases, "agent_seconds": round(agent, 1), "human_seconds": round(human, 1)}
+
+    def print_timings(self) -> None:
+        t = self.timings()
+        print("\n=== Timings ===")
+        for p in t["phases"]:
+            print(f"  {p['phase']:<44} {p['seconds']:6.1f}s")
+        print(f"  {'agent time (excluding approvals)':<44} {t['agent_seconds']:6.1f}s")
+        print(f"  {'approval time (human)':<44} {t['human_seconds']:6.1f}s", flush=True)
+
     def review_items(self, raw_args: Any) -> list[dict[str, Any]]:
         raise NotImplementedError
 
@@ -650,10 +705,12 @@ class AgentSession:
 
     async def review(self, raw_args: Any) -> dict[str, bool]:
         self.set_status("awaiting_approval")
+        self.phase(f"approval: {self.APPROVAL_KIND} (human)")
         try:
             decisions = await self.approver(self.APPROVAL_KIND, self.review_items(raw_args))
         finally:
             self.set_status("running")
+            self.phase(self.AFTER_REVIEW_PHASE)
         self.reviewed.update(decisions)
         return decisions
 
@@ -794,6 +851,7 @@ class NegotiatorRun(AgentSession):
     APPROVAL_TOOL = "send_supplier_email"
     APPROVAL_KIND = SUPPLIER_EMAILS
     TRACE_PREFIX = "negotiator."
+    AFTER_REVIEW_PHASE = "negotiator: write outbox + summary"
 
     def __init__(self, parent: MarginGuardRun) -> None:
         super().__init__(parent.approver, parent.echo, parent)
@@ -828,13 +886,24 @@ class NegotiatorRun(AgentSession):
         return {"error": f"unknown tool {name}"}
 
     async def negotiate(
-        self, client: ZooworkClient, skus: list[str], duty_old: float, duty_new: float
+        self,
+        agent_id: str,
+        client: ZooworkClient,
+        skus: list[str],
+        duty_old: float,
+        duty_new: float,
+        categories: dict[str, str],
     ) -> dict[str, Any]:
-        agent_id = await self.ready_agent(client, NEGOTIATOR)
+        self.phase("negotiator: targets + drafts")
+        lines = []
+        for sku in skus:
+            category = categories.get(sku)
+            query = CATEGORY_QUERIES.get(category or "")
+            lines.append(f"- {sku} ({category}): get_comparables query \"{query}\"" if query else f"- {sku}")
         message = (
-            f"Negotiate unit cost reductions for these REVIEW SKUs: {', '.join(skus)}. "
-            f"Duty goes from {duty_old * 100:g}% to {duty_new * 100:g}% "
-            f"(duty_old {duty_old}, duty_new {duty_new})."
+            f"Negotiate unit cost reductions for these REVIEW SKUs. Duty goes from "
+            f"{duty_old * 100:g}% to {duty_new * 100:g}% (duty_old {duty_old}, duty_new {duty_new}).\n"
+            + "\n".join(lines)
         )
         await self._turn(client, agent_id, message)
         if self.send_result is not None:
@@ -866,6 +935,7 @@ class MarginGuardRun(AgentSession):
 
     APPROVAL_TOOL = "apply_price_changes"
     APPROVAL_KIND = PRICE_CHANGES
+    AFTER_REVIEW_PHASE = "marginguard: apply + hand-off"
 
     def __init__(self, approver: Approver, echo: bool = False) -> None:
         super().__init__(approver, echo)
@@ -874,6 +944,7 @@ class MarginGuardRun(AgentSession):
         self.apply_result: dict[str, Any] | None = None
         self.negotiation: dict[str, Any] | None = None
         self.client: ZooworkClient | None = None
+        self._negotiator_agent: asyncio.Task[str] | None = None
 
     def review_items(self, raw_args: Any) -> list[dict[str, Any]]:
         return describe_changes(parse_changes(raw_args))
@@ -899,6 +970,12 @@ class MarginGuardRun(AgentSession):
             result = evaluate_pricing_rules(args, base_prices=self.base_prices)
             self.plan["decisions"] = result["decisions"]
             self.plan["reprice_prices"] = result["reprice_prices"]
+            duties = {k: result["plan_input"][k] for k in ("duty_old", "duty_new")}
+            self.plan["baseline"] = {
+                "input": {**duties, "prices": {}, "volume_drop": 0},
+                "totals": result["baseline_totals"],
+            }
+            self.plan["scenario"] = {"input": result["plan_input"], "totals": result["plan_totals"]}
             return result
         if name == "get_store_prices":
             return read_prices()
@@ -923,10 +1000,13 @@ class MarginGuardRun(AgentSession):
             review = {d["sku"] for d in self.plan.get("decisions") or [] if d["action"] == "REVIEW"}
             if review and not set(skus) <= review:
                 return {"error": f"only REVIEW SKUs can be negotiated: {sorted(review)}"}
-            assert self.client is not None
+            assert self.client is not None and self._negotiator_agent is not None
+            categories = {d["sku"]: d["category"] for d in self.plan.get("decisions") or []}
             result = await NegotiatorRun(self).negotiate(
-                self.client, skus, float(args["duty_old"]), float(args["duty_new"])
+                await self._negotiator_agent, self.client, skus,
+                float(args["duty_old"]), float(args["duty_new"]), categories,
             )
+            self.phase("marginguard: final report")
             self.negotiation = result
             return result
         return {"error": f"unknown tool {name}"}
@@ -943,15 +1023,25 @@ class MarginGuardRun(AgentSession):
             self.trace("prices.snapshot", short(self.base_prices))
             async with create_zoowork_client() as client:
                 self.client = client
+                self.phase("setup: start agents")
+                # Start the negotiator alongside MarginGuard so it is ready when needed.
+                self._negotiator_agent = asyncio.create_task(self.ready_agent(client, NEGOTIATOR))
                 agent_id = await self.ready_agent(client, MARGINGUARD)
+                self.phase("marginguard: analysis")
                 await self._turn(client, agent_id, message)
+                self.phase(None)
             self.status = "succeeded"
+            if self.echo:
+                self.print_timings()
         except Exception as exc:
             self.status = "failed"
             self.error = f"{type(exc).__name__}: {exc}"
             self.trace("run.failed", self.error)
             raise
         finally:
+            self.phase(None)
+            if self._negotiator_agent is not None and not self._negotiator_agent.done():
+                self._negotiator_agent.cancel()
             self.client = None
 
 
