@@ -1,0 +1,132 @@
+{
+  "category": "cotton midi dress",
+  "n": 20,
+  "low": 9.99,
+  "high": 49.99,
+  "median": 32.59,
+  "listings": [
+    {
+      "title": "R.Vivimos Women's Cotton Floral Embroidered Boho Midi Dress with Pockets Large Beige",
+      "price": 47.99,
+      "change_90d": 0.021,
+      "rating": 4.3
+    },
+    {
+      "title": "R.Vivimos Women's Cotton Floral Embroidered Boho Midi Dress with Pockets Medium Beige",
+      "price": 47.99,
+      "change_90d": 0.021,
+      "rating": 4.3
+    },
+    {
+      "title": "Women's Summer Casual Loose Dresses Cotton Boho Floral Midi Dress for Women Beach Vacation with Pockets HD1 Large Flower 0bf",
+      "price": 19.98,
+      "change_90d": 0.0,
+      "rating": 4.2
+    },
+    {
+      "title": "R.Vivimos Women's Cotton Floral Embroidered Boho Midi Dress with Pockets Small Beige",
+      "price": 47.99,
+      "change_90d": 0.021,
+      "rating": 4.3
+    },
+    {
+      "title": "R.Vivimos Women's Cotton Floral Embroidered Boho Midi Dress with Pockets X-Large Beige",
+      "price": 47.99,
+      "change_90d": 0.021,
+      "rating": 4.3
+    },
+    {
+      "title": "chouyatou Women's Casual Gingham Loose-Fit Swing Dress Cotton Lantern Puff Sleeve Plaid Midi Long Dress Medium Black White",
+      "price": 29.5,
+      "change_90d": 0.136,
+      "rating": 3.8
+    },
+    {
+      "title": "Amazon Essentials Women's Regular-Fit Cotton Sateen Smocked Bodice Midi Dress with Removable Straps, A-line Ruffle Short Medium Navy",
+      "price": 30.1,
+      "change_90d": 0.568,
+      "rating": 4.1
+    },
+    {
+      "title": "Amazon Essentials Women's Regular-Fit Cotton Sateen Smocked Bodice Midi Dress with Removable Straps, A-line Ruffle Short Small Navy",
+      "price": 30.1,
+      "change_90d": null,
+      "rating": 4.1
+    },
+    {
+      "title": "Amazon Essentials Girls and Toddlers' Cotton Strappy Midi Dress 2T Beige Hot Pink Posey Floral",
+      "price": 13.7,
+      "change_90d": null,
+      "rating": 4.5
+    },
+    {
+      "title": "Linen Dress Women, Cotton Dresses for Women, Women's Summer Midi Linen Dresses, Linen Cotton Dresses for Women Spring",
+      "price": 9.99,
+      "change_90d": null,
+      "rating": 3.3
+    },
+    {
+      "title": "IN'VOLAND Plus Size Cotton Linen Dresses for Women Short Sleeve Summer Midi Dress with Pockets Navy 22 Plus",
+      "price": 19.99,
+      "change_90d": null,
+      "rating": 4.0
+    },
+    {
+      "title": "IN'VOLAND Plus Size Cotton Linen Dresses for Women Short Sleeve Summer Midi Dress with Pockets Navy 20 Plus",
+      "price": 19.99,
+      "change_90d": null,
+      "rating": 3.8
+    },
+    {
+      "title": "BLENCOT Womens Casual Summer Square Neck Short Sleeve Split Thigh Cotton Dress Boho Floral Print Tie Front Midi Dresses Large Ap120white",
+      "price": 49.99,
+      "change_90d": null,
+      "rating": 4.0
+    },
+    {
+      "title": "Women's Summer Midi Shirt Dresses Button Down 1/2 Sleeve Lapel Casual Cotton Linen Dress Medium A-white",
+      "price": 32.59,
+      "change_90d": null,
+      "rating": 3.5
+    },
+    {
+      "title": "Women's Summer Midi Shirt Dresses Button Down 1/2 Sleeve Lapel Casual Cotton Linen Dress Medium A-light Blue",
+      "price": 32.59,
+      "change_90d": null,
+      "rating": 3.5
+    },
+    {
+      "title": "Women's Summer Midi Shirt Dresses Button Down 1/2 Sleeve Lapel Casual Cotton Linen Dress Large A-white",
+      "price": 32.59,
+      "change_90d": null,
+      "rating": 3.5
+    },
+    {
+      "title": "R.Vivimos Women's Cotton Floral Embroidered Boho Midi Dress with Pockets Small Rustbrown",
+      "price": 46.99,
+      "change_90d": null,
+      "rating": 4.3
+    },
+    {
+      "title": "R.Vivimos Women's Cotton Floral Embroidered Boho Midi Dress with Pockets X-Large Rustbrown",
+      "price": 46.99,
+      "change_90d": null,
+      "rating": 4.3
+    },
+    {
+      "title": "R.Vivimos Women's Cotton Floral Embroidered Boho Midi Dress with Pockets X-Large Fuchsia",
+      "price": 46.99,
+      "change_90d": null,
+      "rating": 4.3
+    },
+    {
+      "title": "R.Vivimos Women's Cotton Floral Embroidered Boho Midi Dress with Pockets Medium Rustbrown",
+      "price": 47.99,
+      "change_90d": null,
+      "rating": 4.3
+    }
+  ],
+  "data_source": "live_zoodata",
+  "source_detail": "ZooData products/search (Amazon US) + products/history",
+  "fetched_at": "2026-11-07"
+}
