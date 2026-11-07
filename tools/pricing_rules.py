@@ -44,6 +44,7 @@ def evaluate_pricing_rules(params: dict[str, Any]) -> dict[str, Any]:
     for r in rows:
         sku, price = r["sku"], r["price"]
         median = medians[r["category"].lower()]
+        cat = r["category"]
         tariff_margin = margins[sku]["margin_new"]
         new_price = price
 
@@ -51,23 +52,25 @@ def evaluate_pricing_rules(params: dict[str, Any]) -> dict[str, Any]:
             action = "REVIEW"
             reason = (
                 f"Tariff margin {tariff_margin:.1%} is below {REVIEW_MARGIN:.0%}; "
-                "flag for sourcing review, do not reprice."
+                "flag for sourcing review, do not reprice"
             )
         elif price < median:
             candidate = min(median, _round_dollars(price * MARKUP_CAP))
             if candidate - price >= MIN_INCREASE:
                 action, new_price = "REPRICE", candidate
-                capped_by = "competitor median" if candidate == median else "10% cap"
-                reason = (
-                    f"Below competitor median ${median:g}; raise to ${candidate:g} "
-                    f"(limited by {capped_by})."
-                )
+                if candidate < median:
+                    reason = f"Below {cat} median ${median:g}; capped at +10% to ${candidate:g}"
+                else:
+                    reason = f"Below {cat} median ${median:g}; raised to the median ${candidate:g}"
             else:
                 action = "ABSORB"
-                reason = f"Below median ${median:g}, but the allowed increase is under ${MIN_INCREASE}."
+                reason = (
+                    f"Below {cat} median ${median:g}, but the allowed increase "
+                    f"(${candidate - price:g}) is under ${MIN_INCREASE}"
+                )
         else:
             action = "ABSORB"
-            reason = f"At or above competitor median ${median:g}."
+            reason = f"At or above {cat} median ${median:g}"
 
         decisions.append(
             {

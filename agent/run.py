@@ -76,13 +76,14 @@ c) Otherwise ABSORB.
 3. Call `get_comparables` once per category. Queries: Pants -> "women linen pants",
    Dresses -> "cotton midi dress", Jackets -> "women denim jacket".
 4. Call `evaluate_pricing_rules` with the duty rates and `medians` keyed by cost-sheet category
-   (Pants, Dresses, Jackets). It applies the decision rules above exactly; use its actions and
-   new prices as given.
+   (Pants, Dresses, Jackets). It applies the decision rules above exactly; use its actions,
+   new prices and reasons as given.
 5. Recalculate the plan with `calc_margins`, passing `reprice_prices` from step 4 and
    `volume_drop: 0.02`.
 6. If there are REPRICE items, call `apply_price_changes` once with all of them, passing
-   `scenario` with the same duty rates and volume_drop 0.02. Each `reason` must cite the
-   competitor median for that category.
+   `scenario` with the same duty rates and volume_drop 0.02. Use each SKU's `reason` from
+   `evaluate_pricing_rules` word for word; it cites the competitor median and says when the
+   +10% cap limited the price.
 7. After the result returns, write a short report:
    - A per-SKU decision table: SKU, action, old price, new price, reason. For REPRICE items
      rejected by the reviewer, show the action as REJECTED and the new price as the old price.
@@ -90,6 +91,9 @@ c) Otherwise ABSORB.
      Estimated recovery, Assumptions.
    - Estimated recovery is `applied_totals.recovery` from the `apply_price_changes` result,
      which covers only the approved changes.
+   - Assumptions must state the comparables data source from the `data_source` field of the
+     `get_comparables` results: "live_zoodata" (live ZooData) or "sample_fallback" (sample
+     fallback data, not live market prices).
 
 ## Rules
 - Never do arithmetic yourself. Every margin, price, exposure, recovery or total you report must
@@ -133,7 +137,8 @@ CUSTOM_TOOLS: list[dict[str, Any]] = [
         "name": "get_comparables",
         "description": (
             "Return competitor listings for a product category: category, n, low, high, "
-            "median, and listings with title, price, change_90d (fraction) and rating."
+            "median, listings with title, price, change_90d (fraction) and rating, and "
+            "data_source (live_zoodata or sample_fallback)."
         ),
         "input_schema": {
             "type": "object",
@@ -329,7 +334,10 @@ def summarize_result(name: str, result: dict[str, Any]) -> str:
     if name == "calc_margins":
         return f"totals {short(result['totals'])}"
     if name == "get_comparables":
-        return f"{result['category']}: n={result['n']} low={result['low']} median={result['median']} high={result['high']}"
+        return (
+            f"{result['category']}: n={result['n']} low={result['low']} median={result['median']} "
+            f"high={result['high']} source={result['data_source']}"
+        )
     if name == "evaluate_pricing_rules":
         counts: dict[str, int] = {}
         for d in result["decisions"]:
