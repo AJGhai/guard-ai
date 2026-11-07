@@ -135,9 +135,10 @@ async def start_run(body: RunBody) -> Any:
 
 @app.get("/events")
 async def events(since: int = 0) -> Any:
-    run = require_run()
-    if isinstance(run, JSONResponse):
-        return run
+    run = state.run
+    if run is None:
+        # No run yet: an empty trace rather than 404, so pollers can start before the first run.
+        return {"status": "not_started", "error": None, "session_id": None, "events": [], "next": 0}
     return {
         "status": run.status,
         "error": run.error,
