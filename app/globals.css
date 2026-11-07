@@ -1,0 +1,205 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "tw-shimmer";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * ZooWork brand tokens (the zoowork.ai docs theme), mapped onto the shadcn
+ * variables the components use. Controls use the neutral ink colour, links
+ * and highlights the brand colour. app.config.ts's accentColor sets
+ * --primary and --zw-brand on <html> (app/layout.tsx), so buttons and links
+ * follow it; dark mode mixes links with white so they stay readable.
+ */
+
+:root {
+  --zw-ink: #0e0522;
+  --zw-ink-2: #3b3846;
+  --zw-ink-3: #706a86;
+  --zw-brand: #5755c6;
+  --zw-success: #168a55;
+  --zw-warning: #b46808;
+  --zw-destructive: #d83a4a;
+
+  --zw-canvas: #ffffff;
+  --zw-sidebar: #f7f7f7;
+  --zw-paper: #ffffff;
+  --zw-surface-subtle: #f7f7f7;
+  --zw-hover: #f6f6f6;
+  --zw-selected: #eeecf2;
+  --zw-line-subtle: #eeeeee;
+  --zw-line: #e5e5e5;
+  --zw-line-strong: #d4d4d4;
+
+  --zw-action: #0e0522;
+  --zw-action-foreground: #ffffff;
+  --zw-focus: #706a86;
+
+  --background: var(--zw-canvas);
+  --foreground: var(--zw-ink);
+  --card: var(--zw-paper);
+  --card-foreground: var(--zw-ink);
+  --popover: var(--zw-paper);
+  --popover-foreground: var(--zw-ink);
+  --primary: var(--zw-action);
+  --primary-foreground: var(--zw-action-foreground);
+  --secondary: var(--zw-surface-subtle);
+  --secondary-foreground: var(--zw-ink);
+  --muted: var(--zw-surface-subtle);
+  --muted-foreground: var(--zw-ink-3);
+  --accent: var(--zw-hover);
+  --accent-foreground: var(--zw-ink);
+  --destructive: var(--zw-destructive);
+  --success: var(--zw-success);
+  --warning: var(--zw-warning);
+  --border: var(--zw-line);
+  --input: var(--zw-line-strong);
+  --ring: var(--zw-focus);
+  --link: var(--zw-brand);
+  --link-hover: color-mix(in srgb, var(--zw-brand) 80%, black);
+  --selection: var(--zw-selected);
+
+  --sidebar: var(--zw-sidebar);
+  --sidebar-foreground: var(--zw-ink);
+  --sidebar-primary: var(--zw-brand);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--zw-selected);
+  --sidebar-accent-foreground: var(--zw-ink);
+  --sidebar-border: var(--zw-line-subtle);
+  --sidebar-ring: var(--zw-focus);
+
+  --radius: 10px;
+
+  --shadow-card: 0 1px 2px #0000000a;
+  --shadow-overlay: 0 8px 24px #0000001a;
+  --shadow-raised: 0 12px 32px #0000001f;
+  --shadow-dialog: 0 20px 48px #00000029;
+}
+
+.dark {
+  --zw-ink: #f4f4f4;
+  --zw-ink-2: #b5b5b5;
+  --zw-ink-3: #858585;
+  --zw-success: #4cc58a;
+  --zw-warning: #e6a34a;
+  --zw-destructive: #f06a76;
+
+  --zw-canvas: #111111;
+  --zw-sidebar: #161616;
+  --zw-paper: #1a1a1a;
+  --zw-surface-subtle: #202020;
+  --zw-hover: #242424;
+  --zw-selected: #242424;
+  --zw-line-subtle: #242424;
+  --zw-line: #2e2e2e;
+  --zw-line-strong: #3b3b3b;
+
+  --zw-action: #f4f4f4;
+  --zw-action-foreground: #111111;
+  --zw-focus: #737373;
+
+  --link: color-mix(in srgb, var(--zw-brand) 55%, white);
+  --link-hover: color-mix(in srgb, var(--zw-brand) 35%, white);
+  --selection: color-mix(in srgb, var(--zw-brand) 35%, transparent);
+
+  --shadow-card: 0 1px 2px #00000052;
+  --shadow-overlay: 0 8px 24px #00000066;
+  --shadow-raised: 0 12px 32px #00000073;
+  --shadow-dialog: 0 20px 48px #00000080;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-link: var(--link);
+  --color-link-hover: var(--link-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  /* The brand's 4 to 12px scale. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: var(--radius);
+  --radius-xl: 12px;
+  --radius-2xl: 12px;
+  --radius-3xl: 12px;
+  --radius-4xl: 12px;
+  --default-transition-duration: 180ms;
+  --default-transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    color-scheme: light;
+    caret-color: var(--primary);
+    scrollbar-color: var(--border) transparent;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  ::selection {
+    background: var(--selection);
+  }
+}
+
+/*
+ * State variants the shadcn/ui and assistant-ui components use (from the
+ * shadcn package's tailwind.css, inlined so the CLI is not a dependency).
+ */
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+@custom-variant data-active (&:where([data-state="active"], [data-active]:not([data-active="false"])));

@@ -1,0 +1,22 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# Secrets stay local. Only the example ships.
+.env*
+!.env.example
+
+# Agent and conversation IDs created by npm run setup and the app.
+# Each reader creates their own resources.
+/.local/
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# misc
+.DS_Store
+npm-debug.log*
