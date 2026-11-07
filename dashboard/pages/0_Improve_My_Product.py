@@ -101,20 +101,12 @@ def sample_jpeg() -> bytes:
 if "pending_price" in st.session_state:
     st.session_state["sb_price"] = st.session_state.pop("pending_price")
 
-with st.sidebar:
-    st.markdown("### Your numbers (per unit)")
-    price = st.number_input("Selling price ($)", 1.0, 500.0, 29.99, 0.5, key="sb_price")
-    supplier_cost = st.number_input("Supplier cost ($)", 0.1, 500.0, 9.00, 0.25)
-    shipping = st.number_input("Shipping to Amazon ($)", 0.0, 100.0, 1.50, 0.25, help="Freight per unit to get stock to an Amazon warehouse.")
-    duty_rate = st.number_input("Duty rate (%)", 0.0, 200.0, 12.0, 1.0, help="Import tax as a share of the product cost. Check the rate for your product and country of origin.") / 100
-    referral = st.number_input("Amazon referral fee (%)", 0.0, 50.0, 15.0, 0.5, help="Amazon's cut of each sale. About 15% for most clothing.") / 100
-    fba_fee = st.number_input("FBA fulfilment fee ($)", 0.0, 100.0, 5.40, 0.1, help="What Amazon charges to store, pack and ship each order.")
-    ad_rate = st.number_input("Ad spend (% of price)", 0.0, 50.0, 10.0, 1.0, help="How much of each sale goes to Amazon ads.") / 100
-    event_key = st.selectbox(
-        "Cost event", list(EVENTS), format_func=lambda k: EVENTS[k][0],
-        help="Applied before the improvements, e.g. a tariff rise on the product's origin.",
-    )
-    st.caption("Your inputs, not facts about Amazon or customs. Price is filled in from your listing.")
+# No side panel: the selling price comes from the listing, and the cost assumptions are fixed demo values
+# (shown in one line under the header). They are assumptions, not facts about Amazon or customs.
+price = float(st.session_state.get("sb_price", 29.99))
+supplier_cost, shipping, duty_rate = 9.00, 1.50, 0.12
+referral, fba_fee, ad_rate = 0.15, 5.40, 0.10
+event_key = "none"   # no cost event
 
 inputs = Inputs(price, supplier_cost, shipping, duty_rate, referral, fba_fee, ad_rate)
 after_event = apply_event(inputs, event_key)
@@ -128,7 +120,11 @@ style.hero(
     hint="Start with step 1 below. Nothing is bought or sent without your approval.",
 )
 style.flow_bar(3 if st.session_state.get("po_saved") else 2 if st.session_state.get("quotes_open") else 1)
-style.glossary()
+st.caption(
+    f"Margin math uses these assumptions per unit: selling price from your listing, supplier cost ${supplier_cost:.2f}, "
+    f"shipping ${shipping:.2f}, duty {duty_rate:.0%}, Amazon fee {referral:.0%}, FBA fee ${fba_fee:.2f}, "
+    f"ads {ad_rate:.0%} of price. They are demo values, not looked up."
+)
 
 # ---------- 1. your product ----------
 
