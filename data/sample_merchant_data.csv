@@ -1,0 +1,11 @@
+sku,name,category,origin,unit_cost,price,units_per_month
+LP-01,Linen Wide-Leg Pant,Pants,Vietnam,14.00,58,420
+LP-02,Linen Drawstring Pant,Pants,Vietnam,11.50,48,380
+LP-03,Tailored Linen Trouser,Pants,India,18.00,78,210
+CD-01,Cotton Midi Dress,Dresses,Bangladesh,16.00,68,300
+CD-02,Smocked Sundress,Dresses,Bangladesh,12.00,44,510
+CD-03,Wrap Shirt Dress,Dresses,China,21.00,64,160
+CD-04,Tiered Maxi Dress,Dresses,India,19.00,82,190
+DJ-01,Classic Denim Jacket,Jackets,China,26.00,79,140
+DJ-02,Cropped Denim Jacket,Jackets,Pakistan,22.00,74,175
+DJ-03,Sherpa Denim Jacket,Jackets,Pakistan,31.00,118,60

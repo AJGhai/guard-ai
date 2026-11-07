@@ -26,7 +26,7 @@ export interface Runtime {
   agentId: string;
   instance: string;
   sessions: SessionStore;
-  /** Compares the deployed Agent with `agent/agent.md`. */
+  /** Compares the deployed Agent with `agent_starter/agent.md`. */
   checkAgent: () => Promise<{ definitionApplied: boolean; desiredState: string }>;
 }
 

@@ -8,7 +8,7 @@ your own product.
 
 It is the companion workspace for the [Publish your Agent guide](https://zoowork.ai/guides/publish-agent).
 Use it with your coding agent (Codex, Cursor or another): point it at this
-directory and ask it to change `agent/agent.md` and `app.config.ts` for your use case.
+directory and ask it to change `agent_starter/agent.md` and `app.config.ts` for your use case.
 
 The other directories in this repository are capability demos built around a business
 scenario (Custom Tools, Remote MCP, RAG, research). This starter has no business logic; it is
@@ -55,7 +55,7 @@ a log or Git; `.env` is ignored by Git.
 
 ## 3. Define your Agent
 
-The Agent is one file: [`agent/agent.md`](agent/agent.md). The YAML frontmatter is the
+The Agent is one file: [`agent_starter/agent.md`](agent_starter/agent.md). The YAML frontmatter is the
 configuration; everything below it is the Agent's instructions.
 
 ```markdown
@@ -114,7 +114,7 @@ npm run setup
 Setup prints `Agent created: <id>`. You never copy an Agent ID anywhere: setup records it in
 `.local/agent.json`, and the app reads it from there.
 
-**To change the Agent later**, edit `agent/agent.md` and run `npm run setup` again. It updates
+**To change the Agent later**, edit `agent_starter/agent.md` and run `npm run setup` again. It updates
 the same Agent and confirms the change by reading it back; a change the Platform did not apply
 fails as `agent_update_not_confirmed` instead of being reported as done. Existing conversations
 use the new configuration from their next message.
@@ -122,7 +122,7 @@ use the new configuration from their next message.
 Setup writes the Agent's whole tool policy from `tools` and `permissions`. A tool approval
 added elsewhere (in Console or with the SDK) is therefore removed by the next setup; setup prints
 a `WARNING` naming each such field before it writes, and `npm run status` lists them. Keep
-approvals in `agent/agent.md`.
+approvals in `agent_starter/agent.md`.
 
 Removing a line works for `thinking` (setup clears it) and `permissions` (setup removes them). The Platform has no documented way to
 clear `model`, `max_tokens` or `timezone`, so setup refuses to remove them: keep a value, or run
@@ -145,7 +145,7 @@ one ZooWork Session.
   The Agent keeps working while the page is closed; its reply is there when you come back.
 - **Stop** (the square button) interrupts the run on the Platform. Closing the page does not.
 - **Allow / Deny** appears on the card of a tool call that needs approval. Set which tools ask
-  in `agent/agent.md` ([Tool approvals](#tool-approvals)).
+  in `agent_starter/agent.md` ([Tool approvals](#tool-approvals)).
 - **Switch conversations** while one is working: the sidebar keeps a spinner on it until its
   reply is done (for up to three background conversations at a time).
 - **Archive** moves a conversation to the sidebar's **Archived** group. It stays readable but
@@ -163,13 +163,13 @@ Agent's ID, state, whether it matches the file, and any tool policy fields setup
 
 ## 5. Make it yours
 
-Most apps only need two files: `agent/agent.md` for what the Agent does, and `app.config.ts`
+Most apps only need two files: `agent_starter/agent.md` for what the Agent does, and `app.config.ts`
 for what the page says and looks like. Changing those two turns the starter into a different
 app; the code stays the same.
 
 | Change | Where |
 | --- | --- |
-| What the Agent does | `agent/agent.md` (then `npm run setup`) |
+| What the Agent does | `agent_starter/agent.md` (then `npm run setup`) |
 | Product name, description, greeting, placeholder, starter prompts, brand color (buttons and links), logo, footnote | `app.config.ts` (no code changes; the fields are described in `lib/app-config.ts`) |
 | A custom card for one of your tools | `components/tool-uis/` (register it in `index.tsx`) |
 | Layout and components | `components/chat-screen.tsx`, `components/` |
@@ -222,8 +222,8 @@ Errors print a stable code and never the key or a provider response body.
 | `platform_project_key_required` | Copy `.env.example` to `.env` and set `ZOOWORK_API_KEY` to a `zwp_live_` Project key. Restart `npm run dev` after editing `.env`. |
 | `run_setup_first` | Run `npm run setup`, then reload the page. |
 | `agent_changed_restart_dev` | `.local/agent.json` now records a different Agent than the running server uses. Restart `npm run dev`. |
-| `invalid_agent_definition: …` | Fix the named problem in `agent/agent.md` and run setup again. |
-| `cannot_remove_model` / `cannot_remove_max_tokens` / `cannot_remove_timezone` | Put the line back in `agent/agent.md`, or run `npm run cleanup` then `npm run setup` to recreate the Agent without it. |
+| `invalid_agent_definition: …` | Fix the named problem in `agent_starter/agent.md` and run setup again. |
+| `cannot_remove_model` / `cannot_remove_max_tokens` / `cannot_remove_timezone` | Put the line back in `agent_starter/agent.md`, or run `npm run cleanup` then `npm run setup` to recreate the Agent without it. |
 | `skills_removed_set_empty_list` | Write `skills: []` to remove all Skills, then run setup. |
 | `agent_update_not_confirmed` | The Platform accepted the update but the Agent does not show it. Run `npm run status`, check the changed values (model id, Skill names, tool names), and run setup again. |
 | `cleanup_incomplete_run_cleanup` | A cleanup stopped partway. Run `npm run cleanup` again to finish it, then `npm run setup`. |
@@ -280,7 +280,7 @@ status   ── GET  /api/status ─────────▶ getAgent (defini
 
 | Path | Responsibility |
 | --- | --- |
-| `agent/agent.md` | The Agent definition |
+| `agent_starter/agent.md` | The Agent definition |
 | `app.config.ts` | Page text and brand |
 | `app/api/` | Routes: sessions, stream, messages, interrupt, archive, approvals, status |
 | `lib/zoowork/` | Server: configuration, client, setup/cleanup, Session index, relay (`relay.ts`), route operations (`chat.ts`) |
@@ -297,7 +297,7 @@ npm run check
 ```
 
 `check` runs the TypeScript check, the offline tests and a production build. It needs no key
-and makes no network request to ZooWork. The tests check that `agent/agent.md` has a valid
+and makes no network request to ZooWork. The tests check that `agent_starter/agent.md` has a valid
 structure, not its example values, so `check` stays green after you customize it. They cover
 the agent definition parser, the
 event reducer (tools, approvals, stop, failures, replay overlap), the route operations
@@ -317,3 +317,143 @@ The chat UI is built with [assistant-ui](https://www.assistant-ui.com/) and
 [shadcn/ui](https://ui.shadcn.com/). Their generated components under `components/` (and
 `lib/utils.ts`, `hooks/`) are MIT-licensed by AgentbaseAI Inc. and shadcn; see
 [`components/NOTICE.md`](components/NOTICE.md) for what was generated and the license texts.
+
+## MarginGuard agent and API
+
+MarginGuard is a Python ZooWork agent that reprices SKUs after a tariff change. It lives in
+`agent/run.py`, with its tools in `tools/` and sample data in `data/` and `market/`. Every price
+change needs a human approval, and only approved changes are written to
+`data/store_prices.json`, the single source of truth for current prices.
+
+### Setup
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+# .env must contain ZOOWORK_API_KEY (see .env.example)
+```
+
+### Terminal mode
+
+```bash
+.venv/bin/python agent/run.py --reset "Duty goes from 12% to 37% on all products. What should we do?"
+```
+
+`--reset` copies `data/store_prices.original.json` over `data/store_prices.json` first. The run
+prints its event trace and asks y/n in the terminal for each proposed price change.
+
+### API mode
+
+```bash
+.venv/bin/uvicorn api.server:app --port 8000
+```
+
+One run at a time. CORS allows the UI dev server at `http://localhost:3000` and
+`http://127.0.0.1:3000`; set `MARGINGUARD_CORS_ORIGINS` (comma-separated) to change that. Errors
+use the starter app's shape, `{"error": "<code>"}`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/run` | Start a run. Body `{"request": "...", "reset": false}`. `202`; `409 run_in_progress` if one is running. |
+| GET | `/events?since=0` | Event trace from index `since`; `next` is the index to poll from next. |
+| GET | `/pending` | The price changes waiting for a decision, if any. |
+| POST | `/approve` | Decide every pending change. Body `{"decisions": {"<sku>": true\|false}}`. |
+| GET | `/plan` | Per-SKU decisions, comparables, baseline and scenario totals (fills in as the run goes). |
+| GET | `/report` | Final report, applied and rejected changes, exposure, estimated recovery. `409 report_not_ready` until the run ends. |
+| GET | `/prices` | Current `data/store_prices.json`. |
+
+Run status moves `running` → `awaiting_approval` → `running` → `succeeded` or `failed`.
+
+**POST /run**
+
+```json
+{ "request": "Duty goes from 12% to 37% on all products. What should we do?", "reset": true }
+```
+```json
+{ "status": "running", "request": "Duty goes from 12% to 37% on all products. What should we do?", "reset": true }
+```
+
+**GET /events?since=48**
+
+```json
+{
+  "status": "succeeded",
+  "error": null,
+  "session_id": "96bf6114f85f46cabc9aa2ae81a6e349",
+  "events": [
+    { "seq": 48, "t": 28.8, "label": "price.skipped", "detail": "DJ-02 -> 81 (rejected by reviewer)" },
+    { "seq": 49, "t": 28.8, "label": "local.result", "detail": "apply_price_changes: applied 4, rejected 1, ..." }
+  ],
+  "next": 54
+}
+```
+
+**GET /pending**
+
+```json
+{
+  "status": "awaiting_approval",
+  "pending": true,
+  "changes": [
+    { "sku": "LP-02", "old_price": 48, "new_price": 53, "reason": "Below Pants median $64; capped at +10% to $53" },
+    { "sku": "DJ-02", "old_price": 74, "new_price": 81, "reason": "Below Jackets median $82; capped at +10% to $81" }
+  ]
+}
+```
+
+**POST /approve** must include every pending SKU (`400 decisions_mismatch` lists `missing` and
+`unknown` SKUs; `409 no_pending_approval` when nothing is waiting). Answer within about 9.5
+minutes, or every change is rejected (ZooWork denies an unanswered approval after 10 minutes).
+
+```json
+{ "decisions": { "LP-01": true, "LP-02": true, "CD-01": true, "CD-02": true, "DJ-02": false } }
+```
+```json
+{ "approved": ["CD-01", "CD-02", "LP-01", "LP-02"], "rejected": ["DJ-02"] }
+```
+
+**GET /plan**
+
+```json
+{
+  "status": "awaiting_approval",
+  "decisions": [
+    { "sku": "LP-02", "name": "Linen Drawstring Pant", "category": "Pants", "action": "REPRICE",
+      "current_price": 48, "new_price": 53, "median": 64, "tariff_margin": 0.6719,
+      "reason": "Below Pants median $64; capped at +10% to $53" },
+    { "sku": "CD-03", "name": "Wrap Shirt Dress", "category": "Dresses", "action": "REVIEW",
+      "current_price": 64, "new_price": 64, "median": 72, "tariff_margin": 0.5505,
+      "reason": "Tariff margin 55.0% is below 56%; flag for sourcing review, do not reprice" }
+  ],
+  "reprice_prices": { "LP-01": 64, "LP-02": 53, "CD-01": 72, "CD-02": 48, "DJ-02": 81 },
+  "comparables": {
+    "women linen pants": { "n": 7, "low": 42, "median": 64, "high": 98, "data_source": "sample_fallback" }
+  },
+  "baseline_totals": { "exposure": 10317.5, "recovery": 0.0, "blended_margin": 0.6438 },
+  "scenario_totals": { "exposure": 10317.5, "recovery": 7425.05, "blended_margin": 0.6624 },
+  "scenario_input": { "duty_old": 0.12, "duty_new": 0.37, "volume_drop": 0.02, "prices": { "LP-01": 64 } }
+}
+```
+
+**GET /report**
+
+```json
+{
+  "status": "succeeded",
+  "error": null,
+  "request": "Duty goes from 12% to 37% on all products. What should we do?",
+  "report": "## Recommended action\n...",
+  "applied": [ { "sku": "LP-01", "old_price": 58, "new_price": 64 } ],
+  "rejected": [ { "sku": "DJ-02", "new_price": 81.0, "status": "rejected by reviewer" } ],
+  "exposure": 10317.5,
+  "estimated_recovery": 6378.06
+}
+```
+
+`estimated_recovery` covers only the approved changes.
+
+**GET /prices**
+
+```json
+{ "LP-01": 64, "LP-02": 53, "LP-03": 78, "CD-01": 72, "CD-02": 48, "CD-03": 64, "CD-04": 82, "DJ-01": 79, "DJ-02": 74, "DJ-03": 118 }
+```

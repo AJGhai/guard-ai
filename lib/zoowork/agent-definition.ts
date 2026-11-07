@@ -5,12 +5,12 @@ import { parse } from "yaml";
 import { StarterError } from "./errors";
 
 /**
- * The Agent is defined by one file, `agent/agent.md`: YAML frontmatter for the
+ * The Agent is defined by one file, `agent_starter/agent.md`: YAML frontmatter for the
  * configuration, and the Markdown body as the instructions (sent as the
  * Agent's `AGENTS.md` persona document). `npm run setup` sends it; editing the
  * file and running setup again updates the same Agent.
  */
-export const AGENT_FILE = join("agent", "agent.md");
+export const AGENT_FILE = join("agent_starter", "agent.md");
 
 const THINKING: readonly ThinkingLevel[] = ["off", "low", "medium", "high", "max"];
 const KEYS = new Set(["name", "model", "thinking", "max_tokens", "tools", "permissions", "global_skills", "skills", "timezone"]);

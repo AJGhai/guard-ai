@@ -20,3 +20,10 @@ next-env.d.ts
 # misc
 .DS_Store
 npm-debug.log*
+
+# MarginGuard (Python)
+.env
+.venv/
+__pycache__/
+agent/.agent_id
+agent/.agent_config_hash

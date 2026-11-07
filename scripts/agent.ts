@@ -1,11 +1,11 @@
 // npm run setup | status | cleanup | models
 //
-// setup    create the Agent from agent/agent.md (or update it after the file
+// setup    create the Agent from agent_starter/agent.md (or update it after the file
 //          changed), then start it
-// status   show the recorded Agent and whether it matches agent/agent.md
+// status   show the recorded Agent and whether it matches agent_starter/agent.md
 // cleanup  delete this app's recorded conversations, then stop and delete
 //          its Agent (stop npm run dev first)
-// models   list the models this key can use, for agent/agent.md's model:
+// models   list the models this key can use, for agent_starter/agent.md's model:
 //
 // Output never includes the key. On failure the command prints a code from
 // the README troubleshooting table and keeps .local/ for the next attempt.
@@ -32,10 +32,10 @@ const NEXT_STEP: Record<string, string> = {
   request_failed: "Could not reach ZooWork Platform (network failure). Keep .local/ as it is, check your connection and run the command again.",
   timeout_or_cancelled: "ZooWork Platform did not answer in time. Keep .local/ as it is, check your connection and run the command again.",
   web_server_running: "Stop npm run dev, then run cleanup again.",
-  cannot_remove_model: "Put model back in agent/agent.md, or run npm run cleanup then npm run setup to recreate the Agent.",
-  cannot_remove_max_tokens: "Put max_tokens back in agent/agent.md, or run npm run cleanup then npm run setup to recreate the Agent.",
-  cannot_remove_timezone: "Put timezone back in agent/agent.md, or run npm run cleanup then npm run setup to recreate the Agent.",
-  skills_removed_set_empty_list: "Write skills: [] in agent/agent.md to remove all Skills, then run setup.",
+  cannot_remove_model: "Put model back in agent_starter/agent.md, or run npm run cleanup then npm run setup to recreate the Agent.",
+  cannot_remove_max_tokens: "Put max_tokens back in agent_starter/agent.md, or run npm run cleanup then npm run setup to recreate the Agent.",
+  cannot_remove_timezone: "Put timezone back in agent_starter/agent.md, or run npm run cleanup then npm run setup to recreate the Agent.",
+  skills_removed_set_empty_list: "Write skills: [] in agent_starter/agent.md to remove all Skills, then run setup.",
   agent_update_not_confirmed: "The Agent does not show the update. Run npm run status, check model, Skill and tool names, and run setup again.",
   cleanup_incomplete_run_cleanup: "A cleanup stopped partway. Run npm run cleanup to finish it, then npm run setup.",
   session_creation_uncertain_retry_cleanup: "A conversation create could not be confirmed. Keep .local/, check the connection and key, and run cleanup again.",
@@ -67,11 +67,11 @@ async function main(command: string | undefined) {
     const report = await agentStatus(client, state, loadAgentDefinition().resource);
     console.log(`Agent:      ${report.agentId}`);
     console.log(`State:      ${report.desiredState}`);
-    console.log(`Definition: ${report.definitionApplied ? "matches agent/agent.md" : "differs from agent/agent.md; run npm run setup"}`);
+    console.log(`Definition: ${report.definitionApplied ? "matches agent_starter/agent.md" : "differs from agent_starter/agent.md; run npm run setup"}`);
     if (report.unsupportedRemoval) console.log(`Note:       ${NEXT_STEP[report.unsupportedRemoval]}`);
     if (report.undeclaredPolicy.length) {
-      console.log(`Note:       The Agent's tool policy has ${list(report.undeclaredPolicy)}, which agent/agent.md does not declare.`);
-      console.log("            npm run setup will remove it. To keep an approval, add it under permissions: in agent/agent.md.");
+      console.log(`Note:       The Agent's tool policy has ${list(report.undeclaredPolicy)}, which agent_starter/agent.md does not declare.`);
+      console.log("            npm run setup will remove it. To keep an approval, add it under permissions: in agent_starter/agent.md.");
     }
     return;
   }
@@ -82,12 +82,12 @@ async function main(command: string | undefined) {
       const definition = loadAgentDefinition();
       const result = await applyAgent(client, path, state, definition.resource, {
         onReplacePolicy: (fields) => {
-          console.warn(`WARNING: The Agent's tool policy has ${list(fields)}, which agent/agent.md does not declare.`);
+          console.warn(`WARNING: The Agent's tool policy has ${list(fields)}, which agent_starter/agent.md does not declare.`);
           console.warn("         This update replaces the whole tool policy and removes it. To keep an approval,");
-          console.warn("         add it under permissions: in agent/agent.md and run npm run setup again.");
+          console.warn("         add it under permissions: in agent_starter/agent.md and run npm run setup again.");
         },
       });
-      const verb = { created: "created", updated: "updated from agent/agent.md", unchanged: "already matches agent/agent.md" }[result.action];
+      const verb = { created: "created", updated: "updated from agent_starter/agent.md", unchanged: "already matches agent_starter/agent.md" }[result.action];
       console.log(`Agent ${verb}: ${result.agentId}`);
       console.log("Agent ready. Run npm run dev and open the URL it prints (http://localhost:3000 unless that port is in use).");
       return;
@@ -106,7 +106,7 @@ main(process.argv[2]).catch((error: unknown) => {
   const code = errorCode(error);
   const head = code.split(":")[0]!;
   console.error(`FAIL: ${code}`);
-  if (error instanceof StarterError && head === "invalid_agent_definition") console.error("Fix agent/agent.md and run the command again.");
+  if (error instanceof StarterError && head === "invalid_agent_definition") console.error("Fix agent_starter/agent.md and run the command again.");
   else if (NEXT_STEP[head]) console.error(NEXT_STEP[head]);
   else console.error("Check .env and keep .local/ as it is while investigating.");
   process.exitCode = 1;

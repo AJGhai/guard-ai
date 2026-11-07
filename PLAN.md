@@ -8,7 +8,7 @@ Hackathon: AI Tinkerers x ZooWork, Sat 7 Nov 2026. Submissions lock 4:00pm. Demo
 ## Who owns what
 | Area | Owner | Files |
 |---|---|---|
-| Agent prompt + behavior | | agent/agent.md |
+| Agent prompt + behavior | | agent_starter/agent.md |
 | Tools / integrations | | |
 | UI | | app/, components/ |
 | Demo script + data | | |

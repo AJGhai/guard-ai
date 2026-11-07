@@ -47,7 +47,7 @@ function compact(value: unknown): unknown {
 
 /**
  * Is the tool policy exactly the declared one? Unlike other sections, a
- * field the Platform has and agent/agent.md does not (an approval added in
+ * field the Platform has and agent_starter/agent.md does not (an approval added in
  * Console or with the SDK) counts as drift: every setup writes the whole
  * policy and so replaces it. Key order does not matter.
  */
@@ -91,7 +91,7 @@ export async function ownedAgent(client: Pick<ZooworkClient, "getAgent">, state:
 }
 
 /**
- * Settings removed from agent/agent.md since the last setup.
+ * Settings removed from agent_starter/agent.md since the last setup.
  *
  * Writing only the remaining fields would leave a removed setting in place,
  * and the Platform documents a clearing value only for `model.thinking`
@@ -149,7 +149,7 @@ export type ApplyResult = { state: AgentState; agentId: string; action: "created
 
 export type ApplyOptions = {
   /**
-   * Called before an update that removes tool policy fields agent/agent.md
+   * Called before an update that removes tool policy fields agent_starter/agent.md
    * does not declare (for example an approval added in Console), with their names.
    */
   onReplacePolicy?: (fields: string[]) => void;
@@ -219,7 +219,7 @@ export type AgentStatusReport = {
   definitionApplied: boolean;
   /** A removal setup will refuse, as an error code. */
   unsupportedRemoval?: string;
-  /** Tool policy fields on the Agent that agent/agent.md does not declare; the next setup removes them. */
+  /** Tool policy fields on the Agent that agent_starter/agent.md does not declare; the next setup removes them. */
   undeclaredPolicy: string[];
 };
 

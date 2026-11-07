@@ -1,13 +1,13 @@
 // What the chat page says and looks like. Change these values to rebrand the
 // app; no component code needs to change. This file is sent to the browser,
 // so never put keys or private data here. The Agent itself is defined in
-// agent/agent.md.
+// agent_starter/agent.md.
 
 import type { AppConfig } from "@/lib/app-config";
 
 export const appConfig: AppConfig = {
   name: "ZooWork Agent Starter",
-  description: "A minimal chat app for an Agent you define in agent/agent.md.",
+  description: "A minimal chat app for an Agent you define in agent_starter/agent.md.",
   greeting: "How can I help you today?",
   placeholder: "Send a message…",
   suggestions: [
