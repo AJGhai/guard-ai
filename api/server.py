@@ -93,6 +93,14 @@ class RunState:
 state = RunState()
 
 
+def data_source(comparables: dict[str, Any] | None) -> str | None:
+    """live_zoodata only when every category used live ZooData; otherwise sample_fallback."""
+    sources = {c.get("data_source") for c in (comparables or {}).values()}
+    if not sources:
+        return None
+    return "live_zoodata" if sources == {"live_zoodata"} else "sample_fallback"
+
+
 def require_run() -> MarginGuardRun | JSONResponse:
     return state.run if state.run is not None else error(404, "no_run")
 
@@ -182,6 +190,12 @@ async def plan() -> Any:
         "baseline_totals": (p.get("baseline") or {}).get("totals"),
         "scenario_totals": (p.get("scenario") or {}).get("totals"),
         "scenario_input": (p.get("scenario") or {}).get("input"),
+        "skus": p.get("skus"),
+        "blended_margin_today": p.get("blended_margin_today"),
+        "applied_totals": (run.apply_result or {}).get("applied_totals"),
+        "applied": (run.apply_result or {}).get("applied"),
+        "rejected": (run.apply_result or {}).get("rejected"),
+        "data_source": data_source(p.get("comparables")),
     }
 
 
@@ -204,6 +218,7 @@ async def report() -> Any:
         "exposure": ((run.plan.get("baseline") or {}).get("totals") or {}).get("exposure"),
         "estimated_recovery": ((run.apply_result or {}).get("applied_totals") or {}).get("recovery"),
         "negotiation": run.negotiation,
+        "data_source": data_source(run.plan.get("comparables")),
         "timings": run.timings(),
     }
 

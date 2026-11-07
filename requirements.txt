@@ -2,3 +2,5 @@ zoowork==0.9.0
 python-dotenv==1.2.4
 fastapi==0.118.0
 uvicorn==0.37.0
+streamlit==1.67.0
+httpx==0.28.1

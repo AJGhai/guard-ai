@@ -351,6 +351,31 @@ python3 -m venv .venv
 price change, then for each supplier email draft. At the end it prints the elapsed time per phase,
 with approval time shown separately from agent time.
 
+### Dashboard
+
+A Streamlit dashboard (`dashboard/app.py`) drives the agent through the API. Start the API first,
+then the dashboard, from the repo root in two terminals:
+
+```bash
+.venv/bin/uvicorn api.server:app --port 8000
+.venv/bin/streamlit run dashboard/app.py
+```
+
+Open http://localhost:8501, set the duty scenario in the sidebar and press **Run MarginGuard**. That
+sends the scenario to `POST /run` with `reset: true` (store prices restored, outbox cleared). The
+page polls the API every 1.5 seconds and shows:
+
+- **Agent activity**: each tool call by MarginGuard and SupplierNegotiator with its status.
+- **Approvals**: the pending price changes or supplier email drafts, each with an approve/reject
+  toggle, and one submit button (`POST /approve`).
+- **KPIs, pricing decisions and margin chart** from `GET /plan` (margins today, under the tariff
+  and after approved changes; dashed line at the 56% review threshold).
+- **Supplier outbox**: approved email drafts from `GET /outbox`. Nothing is sent.
+- A **LIVE ZOODATA** or **SAMPLE** badge from the run's comparables `data_source`.
+
+The dashboard holds no keys and runs no pricing logic. Set `MARGINGUARD_API` if the API is not at
+`http://127.0.0.1:8000`.
+
 ### API mode
 
 ```bash
@@ -367,7 +392,7 @@ use the starter app's shape, `{"error": "<code>"}`.
 | GET | `/events?since=0` | Event trace from index `since`; `next` is the index to poll from next. |
 | GET | `/pending` | The price changes or supplier email drafts waiting for a decision, if any. |
 | POST | `/approve` | Decide every pending item. Body `{"decisions": {"<sku>": true\|false}}`. |
-| GET | `/plan` | Per-SKU decisions, comparables, baseline and scenario totals (fills in as the run goes). |
+| GET | `/plan` | Per-SKU decisions and margins, comparables, baseline, scenario and applied totals, `data_source` (fills in as the run goes). |
 | GET | `/report` | Final report, applied and rejected changes, exposure, estimated recovery. `409 report_not_ready` until the run ends. |
 | GET | `/prices` | Current `data/store_prices.json`. |
 | GET | `/outbox` | Approved supplier email drafts in `data/outbox/`. None are sent. |
