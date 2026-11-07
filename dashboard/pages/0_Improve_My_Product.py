@@ -35,7 +35,8 @@ from agent.photo_spec import prepare_image  # noqa: E402
 from agent.sourcing import run_sourcing  # noqa: E402
 from tools.annotate import annotate  # noqa: E402
 from tools.improve import auto_select, run_pipeline  # noqa: E402
-from tools.demo_store import DEMO_FILE, load_run, save_run  # noqa: E402
+from tools.demo_store import DEMO_FILE, EXAMPLES, load_run, run_path, save_run  # noqa: E402
+from tools.listing import asin_from_text  # noqa: E402
 from tools.unit_economics import breakeven_price_lift  # noqa: E402
 from tools.rfq import VENDORS, build_po, evaluate, po_text, reference_cost, write_po  # noqa: E402
 from tools.spec_sheet import build_spec_sheet, data_uri, pinned_photo_html, sample_photo  # noqa: E402
@@ -130,6 +131,16 @@ st.markdown(
 # ---------- 1. your product ----------
 
 st.markdown("### 1. Your product")
+
+
+def _pick_example() -> None:
+    """Fill the link box from the example picker (runs before the page reruns)."""
+    label = st.session_state.get("example_pick")
+    for e in EXAMPLES:
+        if e["label"] == label:
+            st.session_state["link_input"] = f"https://www.amazon.com/dp/{e['asin']}"
+
+
 mode_label = st.radio(
     "Start from", ["Amazon listing link", "Drop a photo", "Describe it"], horizontal=True,
     label_visibility="collapsed",
@@ -137,7 +148,10 @@ mode_label = st.radio(
 mode = {"Amazon listing link": "link", "Drop a photo": "photo", "Describe it": "description"}[mode_label]
 link, photo_bytes, description = "", None, ""
 if mode == "link":
-    link = st.text_input("Your Amazon listing link (or ASIN)", placeholder="https://www.amazon.com/dp/B0XXXXXXXX")
+    st.selectbox("Try an example listing", ["Pick an example..."] + [e["label"] for e in EXAMPLES],
+                 key="example_pick", on_change=_pick_example)
+    link = st.text_input("Your Amazon listing link (or ASIN)", key="link_input",
+                         placeholder="https://www.amazon.com/dp/B0XXXXXXXX")
     st.caption("We read the listing, its main photo and its reviews from ZooData (about 4 to 6 credits).")
 elif mode == "photo":
     upload = st.file_uploader("Product photo", type=["png", "jpg", "jpeg", "webp"])
@@ -167,13 +181,16 @@ run_key = (mode, basis, tuple(complaints))
 b1, b2, b3 = st.columns([1, 1.3, 1.2])
 analyze_clicked = b1.button("Analyze", type="primary", disabled=not ready, width="stretch")
 autopilot_clicked = b2.button("🚀 Autopilot to purchase order", disabled=not ready, width="stretch")
-instant_clicked = b3.button("⚡ Instant demo", disabled=not DEMO_FILE.exists(), width="stretch",
-                            help="Replays a recorded real run in under a second. Save one with the button below a result.")
+link_asin = asin_from_text(link) if mode == "link" else None
+instant_file = run_path(link_asin) if link_asin and run_path(link_asin).exists() else DEMO_FILE
+instant_clicked = b3.button("⚡ Instant demo", disabled=not instant_file.exists(), width="stretch",
+                            help="Replays a recorded real run in under a second: the one for the listing in the box "
+                                 "if there is one, else the latest saved. Save one with the button below a result.")
 st.caption("Autopilot runs every step, picks the improvements, gets supplier quotes and drafts the order. "
            "It stops only for your approval. About a minute. **Instant demo** replays a recorded run.")
 
 if instant_clicked:
-    saved = load_run()
+    saved = load_run(instant_file)
     recorded = {**saved["state"], "key": run_key, "recorded": True}
     st.session_state["improve"] = recorded
     for k in ("rfq_context", "rfq_result"):
@@ -258,7 +275,11 @@ if state.get("recorded"):
 elif state["key"] != run_key:
     st.caption("Inputs changed since the last run. Press **Analyze** to refresh.")
 if not state.get("recorded") and st.button("💾 Save this run as the instant demo", key="record_demo"):
-    save_run(state, st.session_state.get("rfq_context"), st.session_state.get("rfq_result"))
+    ctx, res = st.session_state.get("rfq_context"), st.session_state.get("rfq_result")
+    save_run(state, ctx, res)  # the latest run
+    saved_asin = (state.get("listing") or {}).get("asin")
+    if saved_asin:
+        save_run(state, ctx, res, run_path(saved_asin))  # and this listing's own recording
     st.success("Saved on this machine. Next time, press Instant demo.")
 
 spec: dict[str, Any] = state["spec"]

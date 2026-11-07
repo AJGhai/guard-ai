@@ -13,7 +13,20 @@ import json
 from pathlib import Path
 from typing import Any
 
-DEMO_FILE = Path(__file__).resolve().parent.parent / "market" / "cache" / "demo_run.json"
+CACHE_DIR = Path(__file__).resolve().parent.parent / "market" / "cache"
+DEMO_FILE = CACHE_DIR / "demo_run.json"  # the latest saved run, whatever the listing
+
+# Real Amazon fashion listings to try. Each can have its own recorded run (run_path).
+EXAMPLES: list[dict[str, str]] = [
+    {"label": "Linen wide-leg pants (LOMON, $25)", "asin": "B0F9KYFRB6"},
+    {"label": "White canvas sneakers (FRACORA, $21)", "asin": "B08MTGC39G"},
+    {"label": "Everywhere belt bag (Pander, $13)", "asin": "B0BM5PD5KB"},
+]
+
+
+def run_path(asin: str) -> Path:
+    """Where the recorded run for one listing lives."""
+    return CACHE_DIR / f"demo_run_{asin}.json"
 
 
 def _to_json(obj: Any) -> Any:
