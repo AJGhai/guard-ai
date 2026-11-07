@@ -976,6 +976,7 @@ class MarginGuardRun(AgentSession):
                 "totals": result["baseline_totals"],
             }
             self.plan["scenario"] = {"input": result["plan_input"], "totals": result["plan_totals"]}
+            self.plan["skus"] = self._sku_margins(duties, result["plan_input"])
             return result
         if name == "get_store_prices":
             return read_prices()
@@ -992,6 +993,13 @@ class MarginGuardRun(AgentSession):
             for row in result["rejected"]:
                 self.trace("price.skipped", f"{row['sku']} -> {fmt(row['new_price'])} ({row['status']})")
             self.apply_result = result
+            if args.get("scenario"):
+                after = calc_margins(
+                    {**args["scenario"], "prices": {r["sku"]: r["new_price"] for r in result["applied"]}},
+                    base_prices=self.base_prices,
+                )["skus"]
+                for sku, row in (self.plan.get("skus") or {}).items():
+                    row["margin_after"] = after[sku]["margin_new"]
             return result
         if name == "request_supplier_negotiation":
             skus = [str(s) for s in args.get("skus") or []]
@@ -1010,6 +1018,26 @@ class MarginGuardRun(AgentSession):
             self.negotiation = result
             return result
         return {"error": f"unknown tool {name}"}
+
+    def _sku_margins(self, duties: dict[str, float], plan_input: dict[str, Any]) -> dict[str, Any]:
+        """Per-SKU margins for the dashboard (not sent to the agent): today (old duty), under the
+        tariff at current prices, and with the proposed plan. margin_after is added on approval."""
+        baseline = calc_margins({**duties, "prices": {}, "volume_drop": 0}, base_prices=self.base_prices)
+        plan = calc_margins(plan_input, base_prices=self.base_prices)
+        # Blended margin today: the same calculation with the new duty equal to the old one.
+        today = calc_margins(
+            {"duty_old": duties["duty_old"], "duty_new": duties["duty_old"], "prices": {}, "volume_drop": 0},
+            base_prices=self.base_prices,
+        )
+        self.plan["blended_margin_today"] = today["totals"]["blended_margin"]
+        return {
+            sku: {
+                "margin_today": row["margin_old"],
+                "margin_tariff": row["margin_new"],
+                "margin_plan": plan["skus"][sku]["margin_new"],
+            }
+            for sku, row in baseline["skus"].items()
+        }
 
     async def run(self, message: str, reset: bool = False) -> None:
         self.status = "running"
