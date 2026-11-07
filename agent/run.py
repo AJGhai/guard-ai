@@ -80,7 +80,8 @@ c) Otherwise ABSORB.
    (Pants, Dresses, Jackets). It applies the decision rules above exactly; use its actions,
    new prices and reasons as given.
 5. Recalculate the plan with `calc_margins`, passing `reprice_prices` from step 4 and
-   `volume_drop: 0.02`.
+   `volume_drop: 0.02`. Wait for this result before step 6: call `apply_price_changes` only
+   after the plan `calc_margins` has returned, never in parallel with it.
 6. If there are REPRICE items, always call `apply_price_changes` once with all of them. Do not
    stop to ask the user whether to submit them: the tool itself asks a human to approve or
    reject each change, and only approved changes are written. Pass
@@ -102,6 +103,8 @@ c) Otherwise ABSORB.
 - Never do arithmetic yourself. Every margin, price, exposure, recovery or total you report must
   come from a tool result.
 - Do not retry a rejected price change.
+- Call tools one step at a time in workflow order. Never call `calc_margins` and
+  `apply_price_changes` in parallel; the plan must be calculated before any price is written.
 - Finish the whole workflow in one turn, including `apply_price_changes`; never end the turn
   with a question about whether to submit the changes.
 - Amounts from `calc_margins` are per month.
@@ -308,8 +311,12 @@ def apply_price_changes(
     changes: list[dict[str, Any]],
     decisions: dict[str, bool],
     scenario: dict[str, Any] | None = None,
+    base_prices: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Write only approved changes to data/store_prices.json."""
+    """Write only approved changes to data/store_prices.json.
+
+    applied_totals are measured against base_prices (the run's starting snapshot) when given.
+    """
     prices = read_prices()
     applied, rejected = [], []
     for change in changes:
@@ -326,9 +333,10 @@ def apply_price_changes(
             applied.append({"sku": sku, "old_price": old, "new_price": prices[sku]})
     result: dict[str, Any] = {"applied": applied, "rejected": rejected}
     if scenario:
-        # Measure recovery for the approved changes against the prices before this write.
+        # Measure recovery for the approved changes against the run's starting prices.
         result["applied_totals"] = calc_margins(
-            {**scenario, "prices": {row["sku"]: row["new_price"] for row in applied}}
+            {**scenario, "prices": {row["sku"]: row["new_price"] for row in applied}},
+            base_prices=base_prices,
         )["totals"]
     if applied:
         write_prices(prices)
@@ -411,6 +419,7 @@ class MarginGuardRun:
         self.session_id: str | None = None
         self.events: list[dict[str, Any]] = []
         self.plan: dict[str, Any] = {"comparables": {}}
+        self.base_prices: dict[str, float] | None = None
         self.apply_result: dict[str, Any] | None = None
         self.report_parts: list[str] = []
         self._start = time.monotonic()
@@ -440,9 +449,9 @@ class MarginGuardRun:
         try:
             args = parse_args(raw_args)
             if name == "load_cost_sheet":
-                return {"rows": load_cost_sheet()}
+                return {"rows": load_cost_sheet(base_prices=self.base_prices)}
             if name == "calc_margins":
-                result = calc_margins(args)
+                result = calc_margins(args, base_prices=self.base_prices)
                 key = "scenario" if args.get("prices") else "baseline"
                 self.plan[key] = {"input": args, "totals": result["totals"], "skus": result["skus"]}
                 return result
@@ -454,7 +463,7 @@ class MarginGuardRun:
                     }
                 return result
             if name == "evaluate_pricing_rules":
-                result = evaluate_pricing_rules(args)
+                result = evaluate_pricing_rules(args, base_prices=self.base_prices)
                 self.plan["decisions"] = result["decisions"]
                 self.plan["reprice_prices"] = result["reprice_prices"]
                 return result
@@ -465,7 +474,9 @@ class MarginGuardRun:
                 if approved is None:
                     # No approval event seen for this call: review before writing anyway.
                     approved = await self.review(changes)
-                result = apply_price_changes(changes, approved, args.get("scenario"))
+                result = apply_price_changes(
+                    changes, approved, args.get("scenario"), base_prices=self.base_prices
+                )
                 for row in result["applied"]:
                     self.trace("price.written", f"{row['sku']}: {fmt(row['old_price'])} -> {fmt(row['new_price'])}")
                 for row in result["rejected"]:
@@ -572,6 +583,9 @@ class MarginGuardRun:
             if reset:
                 reset_prices()
                 self.trace("prices.reset", f"{ORIGINAL_PRICES_FILE.name} -> {PRICES_FILE.name}")
+            # Baseline for every margin in this run, so approved writes can't shift plan numbers.
+            self.base_prices = read_prices()
+            self.trace("prices.snapshot", short(self.base_prices))
             async with create_zoowork_client() as client:
                 agent_id, action = await get_or_create_agent(client)
                 if action != "existing":

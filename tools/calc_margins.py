@@ -1,7 +1,9 @@
 """Margin calculator for MarginGuard (simple placeholder; a teammate will replace it with a tested version).
 
-Current prices come from data/store_prices.json (the single source of truth). The CSV cost sheet
-only supplies name, category, origin, unit_cost and units_per_month; its price column is ignored.
+Current prices come from data/store_prices.json (the single source of truth), or from a snapshot
+of it passed as `base_prices` so a run keeps one baseline even after prices are written. The CSV
+cost sheet only supplies name, category, origin, unit_cost and units_per_month; its price column is
+ignored.
 
 calc_margins(params) with params:
     duty_old     float  current duty rate, e.g. 0.12
@@ -36,9 +38,11 @@ COST_SHEET = DATA / "sample_merchant_data.csv"
 STORE_PRICES = DATA / "store_prices.json"
 
 
-def load_cost_sheet(path: Path = COST_SHEET) -> list[dict[str, Any]]:
-    """Cost sheet rows with `price` taken from data/store_prices.json."""
-    prices = json.loads(STORE_PRICES.read_text())
+def load_cost_sheet(
+    path: Path = COST_SHEET, base_prices: dict[str, float] | None = None
+) -> list[dict[str, Any]]:
+    """Cost sheet rows with `price` from base_prices, or data/store_prices.json if not given."""
+    prices = base_prices if base_prices is not None else json.loads(STORE_PRICES.read_text())
     with path.open(newline="") as f:
         rows = []
         for row in csv.DictReader(f):
@@ -59,13 +63,15 @@ def load_cost_sheet(path: Path = COST_SHEET) -> list[dict[str, Any]]:
         return rows
 
 
-def calc_margins(params: dict[str, Any]) -> dict[str, Any]:
+def calc_margins(
+    params: dict[str, Any], base_prices: dict[str, float] | None = None
+) -> dict[str, Any]:
     duty_old = float(params["duty_old"])
     duty_new = float(params["duty_new"])
     prices = {str(k): float(v) for k, v in (params.get("prices") or {}).items()}
     volume_drop = float(params.get("volume_drop") or 0.0)
 
-    rows = load_cost_sheet()
+    rows = load_cost_sheet(base_prices=base_prices)
     known = {r["sku"] for r in rows}
     unknown = sorted(set(prices) - known)
     if unknown:

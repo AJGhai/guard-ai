@@ -28,16 +28,22 @@ def _round_dollars(value: float) -> int:
     return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def evaluate_pricing_rules(params: dict[str, Any]) -> dict[str, Any]:
-    """params: duty_old, duty_new, medians {cost-sheet category: comparable median}."""
+def evaluate_pricing_rules(
+    params: dict[str, Any], base_prices: dict[str, float] | None = None
+) -> dict[str, Any]:
+    """params: duty_old, duty_new, medians {cost-sheet category: comparable median}.
+
+    base_prices: the run's starting price snapshot; defaults to data/store_prices.json.
+    """
     medians = {str(k).lower(): float(v) for k, v in (params.get("medians") or {}).items()}
-    rows = load_cost_sheet()
+    rows = load_cost_sheet(base_prices=base_prices)
     missing = sorted({r["category"] for r in rows if r["category"].lower() not in medians})
     if missing:
         raise ValueError(f"Missing medians for categories: {', '.join(missing)}")
 
     margins = calc_margins(
-        {"duty_old": params["duty_old"], "duty_new": params["duty_new"], "prices": {}, "volume_drop": 0}
+        {"duty_old": params["duty_old"], "duty_new": params["duty_new"], "prices": {}, "volume_drop": 0},
+        base_prices=base_prices,
     )["skus"]
 
     decisions = []
