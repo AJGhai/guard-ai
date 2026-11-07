@@ -102,6 +102,9 @@ def market_picture(keyword: str) -> dict[str, Any]:
         "top_title": top.get("title"),
         "listings": [
             {
+                "asin": r.get("asin"),
+                "parent_asin": r.get("parentAsin") or r.get("asin"),
+                "image": r.get("imageUrl"),
                 "title": r.get("title"),
                 "brand": r.get("brandName"),
                 "price": r["price"],

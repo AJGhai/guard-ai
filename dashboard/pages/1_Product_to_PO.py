@@ -1,17 +1,19 @@
-"""Product-to-PO, Step 1: from a product idea to a better, checked product.
+"""Product-to-PO, Step 1: from a product to a better, checked product, backed by real reviews.
 
 Run from the repo root:
-    .venv\\Scripts\\streamlit run dashboard/app.py (this page is in the sidebar)
+    .venv\\Scripts\\streamlit run dashboard/app.py   (this page is in the sidebar)
 
-Flow: market picture (ZooData) -> unit economics -> cost event -> advisor agent (ZooWork)
-proposes product changes from buyer complaints -> before/after view -> draft supplier request.
-Margin math is deterministic (tools/unit_economics.py); the agent only proposes changes and
-rough cost/price effects, which are labelled as estimates.
+Start from a description or a pasted Amazon listing. The page reads the market (ZooData), pulls the
+most helpful low-star and high-star reviews of the competing listings, counts the themes, and asks
+an advisor agent (ZooWork) for product changes. The agent may only cite themes and review ids that
+exist; every count shown is computed in code (tools/reviews.py). Margin math is deterministic
+(tools/unit_economics.py). Cost and price effects of a change are the agent's estimates.
 """
 
 from __future__ import annotations
 
 import html
+import re
 import sys
 from collections import defaultdict
 from dataclasses import asdict
@@ -28,25 +30,22 @@ sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
 import style  # noqa: E402
-from agent.advisor import advise  # noqa: E402
+from agent.advisor import advise_evidence  # noqa: E402
 from tools.market import market_picture  # noqa: E402
+from tools.reviews import build_evidence, fetch_listing, gather_reviews, parse_asin  # noqa: E402
 from tools.unit_economics import (  # noqa: E402
     EVENTS,
     Inputs,
     apply_changes,
     apply_event,
+    breakeven_price_lift,
     compute,
     price_to_hold_margin,
     supplier_cost_to_hold_margin,
 )
 
 GREEN, AMBER, RED, GREY, BLUE = style.GREEN, style.AMBER, style.RED, style.GREY, style.BLUE
-
-SAMPLE_COMPLAINTS = """Runs very small, had to order two sizes up
-Fabric is see-through in white
-Wrinkles badly after one wash
-Elastic waistband loosened after a few washes
-Color looks different from the photo"""
+DEFAULT_KEYWORD = "women linen wide leg pants"
 
 # Where a change shows on the product photo: (x%, y%).
 REGION_XY = {"upper": (50, 20), "waist": (50, 38), "lower_body": (50, 62), "hem": (50, 88), "whole": (84, 50)}
@@ -68,14 +67,56 @@ def get_market(keyword: str) -> dict[str, Any]:
     return market_picture(keyword)
 
 
-# ---------- sidebar: the seller's numbers ----------
+def keyword_from_listing(listing: dict[str, Any]) -> str:
+    """A search phrase from a listing title: drop the brand, keep the first few words."""
+    title = re.sub(r"[^\w\s'-]", " ", listing["title"])
+    brand = (listing.get("brand") or "").lower()
+    words = [w for w in title.split() if w.lower() != brand]
+    return " ".join(words[:6])
+
+
+def pick_competitors(market: dict[str, Any], listing: dict[str, Any] | None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    skip: set[str] = set()
+    if listing:
+        out.append({"asin": listing["asin"], "name": f"Your listing ({listing['asin']})", "role": "your listing"})
+        skip |= {listing["asin"], listing.get("parent_asin") or ""}
+    for item in market.get("listings", []):
+        if not item.get("asin") or item["asin"] in skip or item.get("parent_asin") in skip:
+            continue
+        out.append({"asin": item["asin"], "name": item.get("brand") or (item["title"] or "")[:28], "role": "competitor"})
+        if len(out) >= 3:
+            break
+    return out
+
+
+# ---------- sidebar: where to start, and the seller's numbers ----------
 
 with st.sidebar:
-    st.markdown("### Product")
-    keyword = st.text_input("What are you selling?", "women linen wide leg pants")
+    st.markdown("### Start from")
+    mode = st.radio("Start from", ["Describe it", "Amazon listing"], label_visibility="collapsed")
+    listing: dict[str, Any] | None = None
+    if mode == "Amazon listing":
+        link = st.text_input("Amazon link or ASIN", placeholder="https://www.amazon.com/dp/B0F9KYFRB6")
+        if st.button("Load listing", width="stretch"):
+            asin = parse_asin(link)
+            if not asin:
+                st.error("Could not find an ASIN in that.")
+            else:
+                try:
+                    with st.spinner("Reading the listing on ZooData (up to 30 seconds the first time)..."):
+                        st.session_state["listing"] = fetch_listing(asin)
+                except Exception as exc:
+                    st.error(f"Could not load the listing: {exc}")
+        listing = st.session_state.get("listing")
+
+    slot = listing["asin"] if listing else "manual"
+    default_kw = keyword_from_listing(listing) if listing else DEFAULT_KEYWORD
+    keyword = st.text_input("Market search keyword", default_kw, key=f"kw_{slot}")
 
     st.markdown("### Your numbers (per unit)")
-    price = st.number_input("Selling price ($)", 1.0, 500.0, 29.99, 0.5)
+    default_price = float(listing["price"]) if listing and listing.get("price") else 29.99
+    price = st.number_input("Selling price ($)", 1.0, 500.0, default_price, 0.5, key=f"price_{slot}")
     supplier_cost = st.number_input("Supplier cost ($)", 0.1, 500.0, 9.00, 0.25)
     shipping = st.number_input("Shipping to Amazon ($)", 0.0, 100.0, 1.50, 0.25)
     duty_rate = st.number_input("Duty rate (%)", 0.0, 200.0, 12.0, 1.0) / 100
@@ -94,19 +135,33 @@ left, right = st.columns([3, 2])
 with left:
     st.markdown("## Product-to-PO")
     st.markdown(
-        '<span class="subtle">Step 1: from a product idea to a better, checked product. '
-        "A person approves every money step.</span>",
+        '<span class="subtle">Step 1: from a product to a better, checked product, backed by real customer '
+        "reviews. A person approves every money step.</span>",
         unsafe_allow_html=True,
     )
 with right:
     if market["source"] == "live_zoodata":
-        badge = '<span class="badge badge-live">LIVE ZOODATA</span> <span class="subtle">Amazon listings</span>'
+        badge = '<span class="badge badge-live">LIVE ZOODATA</span> <span class="subtle">Amazon listings and reviews</span>'
     else:
         badge = (
             '<span class="badge badge-sample">SAMPLE MARKET DATA</span> '
             f'<span class="subtle">{html.escape(str(market.get("note", "")))}</span>'
         )
     st.markdown(f"<div style='text-align:right'>{badge}</div>", unsafe_allow_html=True)
+
+if listing:
+    lc1, lc2 = st.columns([1, 4])
+    with lc1:
+        if listing.get("image"):
+            st.image(listing["image"], width=150)
+    with lc2:
+        st.markdown(f"**{listing['title']}**")
+        meta = [listing.get("brand"), money(listing["price"]) if listing.get("price") else None,
+                f"{listing['rating']} stars ({listing['rating_count']:,} ratings)" if listing.get("rating") else None,
+                listing["asin"]]
+        st.markdown(f"<span class='subtle'>{' &middot; '.join(str(m) for m in meta if m)}</span>", unsafe_allow_html=True)
+        for f in listing.get("features", [])[:3]:
+            st.markdown(f"<span class='subtle'>&bull; {html.escape(f[:140])}</span>", unsafe_allow_html=True)
 
 # ---------- 1. market picture ----------
 
@@ -126,7 +181,7 @@ m5.metric("Your price vs median", f"{vs_median:+.0%}")
 m5.caption(f"Your price {money(price)}")
 if market["listings"]:
     with st.expander("Top listings"):
-        st.dataframe(pd.DataFrame(market["listings"]), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(market["listings"]).drop(columns=["image"], errors="ignore"), width="stretch", hide_index=True)
 
 # ---------- 2. unit economics ----------
 
@@ -159,11 +214,7 @@ c2.caption(f"Return on landed cost: {pct(today['roi'])}. Fees, duty and ad rate 
 
 st.markdown("### 3. A cost event hits")
 event_key = st.radio(
-    "Event",
-    list(EVENTS),
-    format_func=lambda k: EVENTS[k][0],
-    horizontal=True,
-    label_visibility="collapsed",
+    "Event", list(EVENTS), format_func=lambda k: EVENTS[k][0], horizontal=True, label_visibility="collapsed"
 )
 after_event_inputs = apply_event(base_inputs, event_key)
 after_event = compute(after_event_inputs)
@@ -202,57 +253,108 @@ else:
         st.markdown(
             f'<div class="card"><h4>Improve the product</h4>'
             f'<span class="subtle">A better product can carry about {money(lift)} more on price. '
-            "See the advisor below.</span></div>",
+            "See what buyers say below.</span></div>",
             unsafe_allow_html=True,
         )
 
-# ---------- 4. improvements ----------
+# ---------- 4. what buyers say ----------
 
-st.markdown("### 4. What buyers want changed")
-complaints_text = st.text_area(
-    "Buyer complaints from competing listings (sample reviews; paste your own)",
-    SAMPLE_COMPLAINTS,
-    height=130,
-)
-complaints = [line.strip() for line in complaints_text.splitlines() if line.strip()]
-advice_key = (keyword, tuple(complaints))
+st.markdown("### 4. What buyers actually say")
+competitors = pick_competitors(market, listing)
+if market["source"] != "live_zoodata" or not competitors:
+    st.warning("Reviews need live ZooData results. Check the keyword and the ZooData key.")
+else:
+    names = ", ".join(f"{c['name']}" for c in competitors)
+    st.markdown(
+        f"<span class='subtle'>Reads the most helpful low-star and high-star reviews of: {html.escape(names)}.</span>",
+        unsafe_allow_html=True,
+    )
 
-if st.button("Ask the advisor agent", type="primary", disabled=not complaints):
-    with st.spinner("The advisor agent is working on ZooWork (about 10 seconds)..."):
-        economics = {
-            "price": price,
-            "landed": round(after_event["landed"], 2),
-            "margin": round(after_event["margin"], 3),
-            "market_median_price": mp["median"],
-        }
-        st.session_state["advice"] = {"key": advice_key, "result": advise(keyword, complaints, economics)}
+evidence_key = (keyword, tuple(c["asin"] for c in competitors))
+if st.button("Read the reviews and ask the advisor", type="primary", disabled=not competitors or market["source"] != "live_zoodata"):
+    with st.status("Working...", expanded=True) as status:
+        status.update(label="Fetching reviews from ZooData")
+        st.write(f"Fetching reviews for {len(competitors)} listings")
+        fetched = gather_reviews([c["asin"] for c in competitors])
+        evidence = build_evidence(competitors, fetched)
+        st.write(f"Read {evidence['n_low']} low-star and {evidence['n_high']} high-star reviews")
+        status.update(label="The advisor agent is reading them")
+        result = advise_evidence(
+            keyword, evidence,
+            {"price": price, "landed": round(after_event["landed"], 2), "margin": round(after_event["margin"], 3)},
+            market,
+        )
+        status.update(label="Done", state="complete", expanded=False)
+    st.session_state["advice"] = {"key": evidence_key, "evidence": evidence, "result": result}
 
 advice = st.session_state.get("advice")
 selected: list[dict[str, Any]] = []
-if advice and advice["key"] == advice_key:
-    result = advice["result"]
+if advice and advice["key"] == evidence_key:
+    evidence, result = advice["evidence"], advice["result"]
+
+    for src in evidence["sources"]:
+        if src.get("error"):
+            st.warning(f"Could not read reviews for {src['name']}: {src['error']}")
+    st.markdown(
+        f"**Read {evidence['n_low']} low-star (1 to 3) and {evidence['n_high']} high-star reviews** "
+        f"across {len(evidence['sources'])} listings, the most helpful first."
+    )
+
+    t1, t2 = st.columns([3, 2])
+    with t1:
+        theme_df = pd.DataFrame(
+            [
+                {"Theme": t["name"], "Type": t["kind"], "Reviews": t["count"], "Share of low-star": t["share"],
+                 "Avg rating": t["avg_rating"]}
+                for t in evidence["themes"][:8]
+            ]
+        )
+        st.dataframe(
+            theme_df.style.format({"Share of low-star": "{:.0%}", "Avg rating": "{:.1f}"}),
+            width="stretch", hide_index=True, height=318,
+        )
+    with t2:
+        st.markdown("**What buyers like (keep this)**")
+        likes = ", ".join(p["name"] for p in evidence["positives"][:6]) or "n/a"
+        st.markdown(f"<span class='subtle'>{html.escape(likes)}</span>", unsafe_allow_html=True)
+        st.caption("Themes are ZooData's AI tags on each review. Counts are reviews mentioning the theme.")
+
     if result.get("note"):
         st.warning(result["note"])
-    badge = "ZOOWORK AGENT" if result["source"] == "zoowork_agent" else "SAMPLE ANSWER"
+    is_agent = result["source"] == "zoowork_agent"
     st.markdown(
-        f'<span class="badge badge-{"live" if result["source"] == "zoowork_agent" else "sample"}">{badge}</span> '
+        f'<span class="badge badge-{"live" if is_agent else "sample"}">{"ZOOWORK ADVISOR AGENT" if is_agent else "RULE-BASED"}</span> '
         f'<span class="subtle">{html.escape(result["summary"])}</span>',
         unsafe_allow_html=True,
     )
-    st.caption("Cost and price effects are the agent's estimates. Tick the changes you want to price in.")
+    st.caption(
+        "Each change cites real reviews; the counts come from the data. Cost and price effects are estimates. "
+        "Tick the changes you want to price in."
+    )
     for idx, item in enumerate(result["improvements"]):
-        ck, info = st.columns([2, 5])
-        picked = ck.checkbox(
-            f"{idx + 1}. {item['title']}", key=f"imp_{idx}_{item['title']}", value=False
-        )
-        info.markdown(
-            f'<span class="subtle">Fixes: {html.escape(item["fixes"])} &middot; '
-            f"+{money(item['unit_cost_delta'])} cost, +{money(item['price_delta'])} price "
-            f"({item['confidence']} confidence). Risk: {html.escape(item['risk'])}</span>",
+        sup = item["support"]
+        picked = st.checkbox(f"{idx + 1}. {item['title']}", key=f"imp_{idx}_{item['title']}", value=False)
+        st.markdown(
+            f"<span class='subtle'>{html.escape(item.get('observation', ''))}<br>"
+            f"<b>Backed by {sup['count']} of {sup['of']} low-star reviews ({sup['share']:.0%}), avg {sup['avg_rating']} stars.</b> "
+            f"+{money(item['unit_cost_delta'])} cost, +{money(item['price_delta'])} price ({item['confidence']} confidence). "
+            f"Breaks even at +{money(breakeven_price_lift(after_event_inputs, item['unit_cost_delta']))} price. "
+            f"Risk: {html.escape(item['risk'])}</span>",
             unsafe_allow_html=True,
         )
+        cited = item["review_ids"] or sup["review_ids"][:3]
+        with st.expander(f"Read the reviews behind change {idx + 1}"):
+            for rid in cited[:3]:
+                r = evidence["reviews"][rid]
+                st.markdown(
+                    f"> {r['text']}\n>\n> *{r['rating']:.0f} stars, {r['helpful']} found helpful"
+                    f"{', verified purchase' if r['verified'] else ''}, on {r['competitor']} ({rid})*"
+                )
         if picked:
-            selected.append({**item, "n": idx + 1})
+            selected.append(
+                {**item, "n": idx + 1,
+                 "fixes": f"{sup['count']} of {sup['of']} low-star reviews: {', '.join(item['themes'][:2]) or item['title']}"}
+            )
 
     # margin with the selected changes, on top of the cost event
     cost_add = sum(s["unit_cost_delta"] for s in selected)
@@ -260,12 +362,10 @@ if advice and advice["key"] == advice_key:
     improved_inputs = apply_changes(after_event_inputs, cost_add, price_add)
     improved = compute(improved_inputs)
 
-    # hand the chosen changes to Step 2 (Supplier RFQ page)
     st.session_state["rfq_context"] = {
         "keyword": keyword,
         "changes": [
-            {k: s[k] for k in ("title", "fixes", "unit_cost_delta", "price_delta", "supplier_ask")}
-            for s in selected
+            {k: s[k] for k in ("title", "fixes", "unit_cost_delta", "price_delta", "supplier_ask")} for s in selected
         ],
         "inputs": asdict(after_event_inputs),
         "price_add": price_add,
@@ -277,6 +377,10 @@ if advice and advice["key"] == advice_key:
     r2.metric("Landed cost", money(improved["landed"]), f"{money(improved['landed'] - after_event['landed'])}", delta_color="inverse")
     r3.metric("Profit / unit", money(improved["profit"]), f"{money(improved['profit'] - after_event['profit'])}")
     r4.metric("Margin", pct(improved["margin"]), f"{(improved['margin'] - after_event['margin']) * 100:+.1f} pts")
+    st.caption(
+        "These changes also aim at fewer returns and better ratings. That benefit is not modelled here, "
+        "so the margin shown is the direct cost and price effect only."
+    )
     if selected and improved["price"] > mp["p75"]:
         st.warning(
             f"The new price {money(improved['price'])} is above the 75th percentile of competitors "
@@ -285,7 +389,7 @@ if advice and advice["key"] == advice_key:
 
     # before / after view
     st.markdown("**Before and after** (annotated, not a render)")
-    img = market.get("top_image")
+    img = (listing or {}).get("image") or market.get("top_image")
     b1, b2 = st.columns(2)
     for col, label, pins in ((b1, "Before", []), (b2, "After", selected)):
         with col:
@@ -312,8 +416,9 @@ if advice and advice["key"] == advice_key:
                 f"+{money(s['price_delta'])} price."
             )
         st.caption(
-            "The photo is the top competing listing, used as a stand-in for your product. "
-            "Pin positions are approximate."
+            "The photo is "
+            + ("your listing's main image" if listing else "the top competing listing, used as a stand-in for your product")
+            + ". Pin positions are approximate."
         )
 
     # ---------- 5. draft request for quote ----------
