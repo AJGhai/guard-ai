@@ -29,3 +29,7 @@ agent/.agent_id
 agent/.agent_config_hash
 agent/.advisor_agent_id
 agent/.advisor_config_hash
+agent/.negotiator_agent_id
+agent/.negotiator_config_hash
+# Approved supplier email drafts (run output; never sent).
+data/outbox/

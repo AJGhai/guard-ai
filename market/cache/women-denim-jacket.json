@@ -1,0 +1,132 @@
+{
+  "category": "women denim jacket",
+  "n": 20,
+  "low": 14.84,
+  "high": 45.99,
+  "median": 39.98,
+  "listings": [
+    {
+      "title": "Oversized Denim Jacket Women Mid Long Casual Jean Coat Medium Denim Blue",
+      "price": 45.99,
+      "change_90d": -0.13,
+      "rating": 4.4
+    },
+    {
+      "title": "Oversized Denim Jacket Women Mid Long Casual Jean Coat Large Denim Blue",
+      "price": 45.99,
+      "change_90d": -0.13,
+      "rating": 4.4
+    },
+    {
+      "title": "Oversized Denim Jacket Women Mid Long Casual Jean Coat Small Denim Blue",
+      "price": 36.79,
+      "change_90d": -0.13,
+      "rating": 4.4
+    },
+    {
+      "title": "Oversized Denim Jacket Women Mid Long Casual Jean Coat X-Large Denim Blue",
+      "price": 45.99,
+      "change_90d": -0.13,
+      "rating": 4.4
+    },
+    {
+      "title": "Women Oversized Denim Jacket Boyfriend Loose Fall Trucker Coats Medium Light Blue",
+      "price": 38.99,
+      "change_90d": 0.026,
+      "rating": 4.4
+    },
+    {
+      "title": "Hanes Women's String Bralette Pack, 3-Pack, Cotton Sports Bralette Bras for Women, Solid or Assorted Wireless Bras Medium Denim Jacket/Concrete Heather/Ultra Blue",
+      "price": 14.84,
+      "change_90d": -0.127,
+      "rating": 4.2
+    },
+    {
+      "title": "Women Denim Shirt Jean Jacket Oversize Button Down Shirt Long Sleeve Jean Tops Trendy Shackets Light Blue Large",
+      "price": 37.98,
+      "change_90d": -0.05,
+      "rating": 4.2
+    },
+    {
+      "title": "Women Denim Shirt Jean Jacket Oversize Button Down Shirt Long Sleeve Jean Tops Trendy Shackets Light Blue Medium",
+      "price": 37.98,
+      "change_90d": -0.05,
+      "rating": 4.2
+    },
+    {
+      "title": "Oversized Denim Jacket Women Mid Long Casual Jean Coat Medium Dark Blue",
+      "price": 45.99,
+      "change_90d": 0.093,
+      "rating": 4.4
+    },
+    {
+      "title": "Oversized Denim Jacket Women Mid Long Casual Jean Coat XX-Large Denim Blue",
+      "price": 45.99,
+      "change_90d": 0.023,
+      "rating": 4.4
+    },
+    {
+      "title": "Hanes Women's String Bralette Pack, 3-Pack, Cotton Sports Bralette Bras for Women, Solid or Assorted Wireless Bras X-Large Denim Jacket/Concrete Heather/Ultra Blue",
+      "price": 14.84,
+      "change_90d": null,
+      "rating": 4.2
+    },
+    {
+      "title": "Hanes Women's String Bralette Pack, 3-Pack, Cotton Sports Bralette Bras for Women, Solid or Assorted Wireless Bras Large Denim Jacket/Concrete Heather/Ultra Blue",
+      "price": 14.84,
+      "change_90d": null,
+      "rating": 4.2
+    },
+    {
+      "title": "Women Oversized Denim Jacket Boyfriend Loose Fall Trucker Coats Large Light Blue",
+      "price": 39.99,
+      "change_90d": null,
+      "rating": 4.4
+    },
+    {
+      "title": "Tankaneo Women Denim Vest Tops Sleeveless Jean Shirts Jacket Waistcoats Large Navy",
+      "price": 27.06,
+      "change_90d": null,
+      "rating": 4.1
+    },
+    {
+      "title": "Women Oversized Denim Jacket Embroidered Pearls Beading Jeans Coat Large Blue",
+      "price": 39.98,
+      "change_90d": null,
+      "rating": 4.6
+    },
+    {
+      "title": "Women Oversized Denim Jacket Embroidered Pearls Beading Jeans Coat Medium Blue",
+      "price": 39.98,
+      "change_90d": null,
+      "rating": 4.6
+    },
+    {
+      "title": "Oversized Denim Jacket Women Mid Long Casual Jean Coat Large Dark Blue",
+      "price": 45.99,
+      "change_90d": null,
+      "rating": 4.4
+    },
+    {
+      "title": "Hanes Women's String Bralette Pack, 3-Pack, Cotton Sports Bralette Bras for Women, Solid or Assorted Wireless Bras XX-Large Denim Jacket/Concrete Heather/Ultra Blue",
+      "price": 14.84,
+      "change_90d": null,
+      "rating": 4.2
+    },
+    {
+      "title": "Women Denim Shirt Jean Jacket Oversize Button Down Shirt Long Sleeve Jean Tops Trendy Shackets Light Blue X-Large",
+      "price": 39.98,
+      "change_90d": null,
+      "rating": 4.2
+    },
+    {
+      "title": "luvamia Denim Jacket for Women Distressed Jean Jackets Button Up Vintage Western Trucker Jacket Frayed Hem Pockets Medium Wishful Blue",
+      "price": 44.99,
+      "change_90d": null,
+      "rating": 4.5
+    }
+  ],
+  "data_source": "live_zoodata",
+  "source_detail": "ZooData products/search (Amazon US) + products/history",
+  "fetched_at": "2026-11-07"
+}

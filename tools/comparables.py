@@ -1,38 +1,46 @@
 """Competitor comparables for MarginGuard.
 
-Two sources, chosen by the COMPARABLES_MODE environment variable:
+Order of lookup for a category query:
+  1. market/cache/<query>.json  - a saved live ZooData result (no network, no credits)
+  2. live ZooData               - products/search on Amazon US, plus products/history per
+                                  listing for the 90-day price change; saved to the cache
+  3. market/fallback_prices.json - sample data, used when there is no key or the live call fails
 
-  fallback (default)  market/fallback_prices.json: curated premium-tier sample, no network.
-  live                ZooData (Amazon): best-selling listings above COMPARABLES_PRICE_MIN
-                      (default $40), de-duplicated by parent listing. Falls back to the sample
-                      automatically if the key is missing, the call fails, or fewer than
-                      MIN_LIVE_LISTINGS listings come back.
-
-Every result carries data_source: "live_zoodata" or "sample_fallback", which is the source
-that produced median/low/high (the numbers the pricing rules use).
+Every result carries data_source: "live_zoodata" or "sample_fallback".
+The key is ZOODATA_API_KEY, read from .env (or the process environment).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import statistics
+import urllib.error
+import urllib.request
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
-
-import httpx
 
 LIVE_ZOODATA = "live_zoodata"
 SAMPLE_FALLBACK = "sample_fallback"
 
-FALLBACK = Path(__file__).resolve().parent.parent / "market" / "fallback_prices.json"
+ROOT = Path(__file__).resolve().parent.parent
+FALLBACK = ROOT / "market" / "fallback_prices.json"
+CACHE_DIR = ROOT / "market" / "cache"
 
-ZOODATA_SEARCH_URL = "https://api.zoodata.ai/openapi/v2/products/search"
-ZOODATA_FASHION_CATEGORY = "Clothing, Shoes & Jewelry"
-DEFAULT_PRICE_MIN = 40.0
-MIN_LIVE_LISTINGS = 5  # unique parent listings needed before live numbers are trusted
-TARGET_LISTINGS = 12  # stop paging once we have this many
-MAX_PAGES = 3  # 1 ZooData credit per page
+API_KEY_ENV = "ZOODATA_API_KEY"
+BASE_URL = "https://api.zoodata.ai/openapi/v2"
+TIMEOUT = 30
+PAGE_SIZE = 20  # listings requested from products/search
+HISTORY_LIMIT = 10  # products/history is one call (and one credit charge) per ASIN
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
 
 # Map cost-sheet categories and common words onto the sample categories.
 ALIASES = {
@@ -46,6 +54,125 @@ ALIASES = {
     "jacket": "women denim jacket",
 }
 
+
+class ZooDataError(Exception):
+    pass
+
+
+# ---------- cache ----------
+
+def _cache_path(query: str) -> Path:
+    slug = re.sub(r"[^a-z0-9]+", "-", query.strip().lower()).strip("-") or "query"
+    return CACHE_DIR / f"{slug}.json"
+
+
+def _read_cache(query: str) -> dict[str, Any] | None:
+    path = _cache_path(query)
+    if not path.exists():
+        return None
+    try:
+        result = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if result.get("data_source") != LIVE_ZOODATA or not result.get("listings"):
+        return None
+    result["source_detail"] = f"cached live ZooData ({path.relative_to(ROOT)})"
+    return result
+
+
+def _write_cache(query: str, result: dict[str, Any]) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _cache_path(query).write_text(json.dumps(result, indent=2) + "\n")
+
+
+# ---------- live ZooData ----------
+
+def _post(endpoint: str, body: dict[str, Any], api_key: str) -> dict[str, Any]:
+    req = urllib.request.Request(
+        f"{BASE_URL}/{endpoint}",
+        data=json.dumps(body).encode(),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "MarginGuard/1.0 (Python)",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            payload = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise ZooDataError(f"{endpoint}: HTTP {e.code}") from e
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        raise ZooDataError(f"{endpoint}: {e}") from e
+    if payload.get("success") is False:
+        err = payload.get("error") or {}
+        raise ZooDataError(f"{endpoint}: {err.get('code') or err.get('message') or 'failed'}")
+    return payload
+
+
+def _change_90d(asin: str, api_key: str) -> float | None:
+    """Fractional price change over 90 days from products/history, or None if unavailable."""
+    end = date.today() - timedelta(days=1)
+    try:
+        payload = _post("products/history", {
+            "asin": asin,
+            "startDate": (end - timedelta(days=90)).isoformat(),
+            "endDate": end.isoformat(),
+            "marketplace": "US",
+        }, api_key)
+    except ZooDataError:
+        return None
+    data = payload.get("data")
+    if isinstance(data, list):
+        data = data[0] if data else None
+    prices = [p for p in ((data or {}).get("price") or []) if isinstance(p, (int, float)) and p > 0]
+    if len(prices) < 2:
+        return None
+    return round((prices[-1] - prices[0]) / prices[0], 3)
+
+
+def _live(query: str, api_key: str) -> dict[str, Any]:
+    payload = _post("products/search", {
+        "keyword": query,
+        "sortBy": "monthlySalesFloor",
+        "sortOrder": "desc",
+        "pageSize": PAGE_SIZE,
+        "page": 1,
+    }, api_key)
+    rows = payload.get("data")
+    if not isinstance(rows, list):
+        raise ZooDataError("products/search: unexpected response shape")
+
+    products = [r for r in rows if isinstance(r.get("price"), (int, float)) and r["price"] > 0]
+    if not products:
+        raise ZooDataError("products/search: no priced listings")
+
+    listings = []
+    for i, p in enumerate(products):
+        asin = p.get("asin")
+        listings.append({
+            "title": p.get("title") or "",
+            "price": round(float(p["price"]), 2),
+            "change_90d": _change_90d(asin, api_key) if asin and i < HISTORY_LIMIT else None,
+            "rating": p.get("rating"),
+        })
+
+    prices = [item["price"] for item in listings]
+    return {
+        "category": query,
+        "n": len(listings),
+        "low": min(prices),
+        "high": max(prices),
+        "median": round(statistics.median(prices), 2),
+        "listings": listings,
+        "data_source": LIVE_ZOODATA,
+        "source_detail": "ZooData products/search (Amazon US) + products/history",
+        "fetched_at": date.today().isoformat(),
+    }
+
+
+# ---------- sample fallback ----------
 
 def _match(query: str, categories: list[str]) -> str | None:
     q = query.strip().lower()
@@ -61,104 +188,52 @@ def _match(query: str, categories: list[str]) -> str | None:
     return None
 
 
-def _stats(prices: list[float]) -> dict[str, Any]:
-    out: dict[str, Any] = {
-        "n": len(prices),
-        "low": min(prices),
-        "high": max(prices),
-        "median": statistics.median(prices),
-    }
-    if len(prices) >= 2:
-        out["p75"] = round(statistics.quantiles(prices, n=4)[2], 2)
-    return out
-
-
-def _live_listings(keyword: str, price_min: float) -> list[dict[str, Any]] | None:
-    """Best-selling ZooData listings at or above price_min, one per parent listing.
-
-    Returns None when live data is unavailable or too thin, so the caller can fall back.
-    """
-    key = os.environ.get("ZOODATA_API_KEY", "").strip()
-    if not key:
-        return None
-
-    seen: dict[str, dict[str, Any]] = {}
-    try:
-        with httpx.Client(timeout=15) as client:
-            for page in range(1, MAX_PAGES + 1):
-                resp = client.post(
-                    ZOODATA_SEARCH_URL,
-                    headers={"Authorization": f"Bearer {key}"},
-                    json={
-                        "keyword": keyword,
-                        "keywordMatchType": "fuzzy",
-                        "categoryPath": [ZOODATA_FASHION_CATEGORY],
-                        "priceMin": price_min,
-                        "sortBy": "monthlySalesFloor",
-                        "sortOrder": "desc",
-                        "page": page,
-                    },
-                )
-                body = resp.json()
-                if resp.status_code != 200 or not body.get("success"):
-                    break
-                rows = body.get("data") or []
-                for row in rows:
-                    parent = row.get("parentAsin") or row.get("asin")
-                    if parent and parent not in seen and row.get("price"):
-                        seen[parent] = {
-                            "title": row.get("title"),
-                            "price": row["price"],
-                            "brand": row.get("brandName"),
-                            "rating": row.get("rating"),
-                            "monthly_sales_floor": row.get("monthlySalesFloor"),
-                            "bsr": row.get("bsr"),
-                        }
-                if len(seen) >= TARGET_LISTINGS or not rows:
-                    break
-    except (httpx.HTTPError, ValueError):
-        pass  # keep whatever pages succeeded; the size check below decides
-
-    listings = list(seen.values())
-    return listings if len(listings) >= MIN_LIVE_LISTINGS else None
-
-
-def get_comparables(params: dict[str, Any]) -> dict[str, Any]:
-    query = str(params.get("category_query", ""))
+def _fallback(query: str, reason: str) -> dict[str, Any]:
     data = json.loads(FALLBACK.read_text())
     categories = [k for k in data if not k.startswith("_")]
     category = _match(query, categories)
-
-    fallback = None
-    if category is not None:
-        listings = data[category]["listings"]
-        fallback = {
-            "category": category,
-            "listings": listings,
+    if category is None:
+        return {
+            "error": "no comparables for this query",
+            "available_categories": categories,
             "data_source": SAMPLE_FALLBACK,
-            "source_detail": "market/fallback_prices.json",
-            **_stats([item["price"] for item in listings]),
+            "fallback_reason": reason,
         }
 
-    if os.environ.get("COMPARABLES_MODE", "fallback").strip().lower() == "live":
-        price_min = float(os.environ.get("COMPARABLES_PRICE_MIN", DEFAULT_PRICE_MIN))
-        live = _live_listings(category or query, price_min)
-        if live:
-            result: dict[str, Any] = {
-                "category": category or query,
-                "listings": live,
-                "data_source": LIVE_ZOODATA,
-                "source_detail": f"ZooData Amazon best sellers, price >= ${price_min:g}",
-                **_stats([item["price"] for item in live]),
-            }
-            if fallback:
-                result["sample_median"] = fallback["median"]
-            return result
-
-    if fallback is not None:
-        return fallback
+    listings = data[category]["listings"]
+    prices = [item["price"] for item in listings]
     return {
-        "error": "no comparables for this query",
-        "available_categories": categories,
+        "category": category,
+        "n": len(listings),
+        "low": min(prices),
+        "high": max(prices),
+        "median": statistics.median(prices),
+        "listings": listings,
         "data_source": SAMPLE_FALLBACK,
+        "source_detail": "market/fallback_prices.json",
+        "fallback_reason": reason,
     }
+
+
+# ---------- entry point ----------
+
+def get_comparables(params: dict[str, Any]) -> dict[str, Any]:
+    query = str(params.get("category_query", "")).strip()
+    if not query:
+        return _fallback(query, "empty query")
+
+    cached = _read_cache(query)
+    if cached:
+        return cached
+
+    api_key = os.environ.get(API_KEY_ENV, "").strip()
+    if not api_key:
+        return _fallback(query, f"{API_KEY_ENV} not set in .env")
+
+    try:
+        result = _live(query, api_key)
+    except ZooDataError as e:
+        return _fallback(query, f"live ZooData failed: {e}")
+
+    _write_cache(query, result)
+    return result

@@ -317,3 +317,214 @@ The chat UI is built with [assistant-ui](https://www.assistant-ui.com/) and
 [shadcn/ui](https://ui.shadcn.com/). Their generated components under `components/` (and
 `lib/utils.ts`, `hooks/`) are MIT-licensed by AgentbaseAI Inc. and shadcn; see
 [`components/NOTICE.md`](components/NOTICE.md) for what was generated and the license texts.
+
+## MarginGuard agent and API
+
+MarginGuard is a Python ZooWork agent that reprices SKUs after a tariff change. It lives in
+`agent/run.py`, with its tools in `tools/` and sample data in `data/` and `market/`. Every price
+change needs a human approval, and only approved changes are written to
+`data/store_prices.json`, the single source of truth for current prices.
+
+SKUs that MarginGuard marks REVIEW go to a second agent, SupplierNegotiator, through the
+`request_supplier_negotiation` tool. It calculates the unit cost that restores a 60% margin
+(`tools/supplier.py`), drafts a cost-reduction email to each supplier in `data/suppliers.csv`, and
+asks a human to approve each draft. Approved drafts are written to `data/outbox/<sku>.md`; no email
+is ever sent. SupplierNegotiator runs on Claude Haiku 5.5 with low thinking (`NEGOTIATOR_MODEL` in
+`agent/run.py`); MarginGuard keeps the platform default model.
+
+### Setup
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+# .env must contain ZOOWORK_API_KEY (see .env.example)
+```
+
+### Terminal mode
+
+```bash
+.venv/bin/python agent/run.py --reset "Duty goes from 12% to 37% on all products. What should we do?"
+```
+
+`--reset` copies `data/store_prices.original.json` over `data/store_prices.json` and clears
+`data/outbox/` first. The run prints its event trace and asks y/n in the terminal for each proposed
+price change, then for each supplier email draft. At the end it prints the elapsed time per phase,
+with approval time shown separately from agent time.
+
+### Dashboard
+
+A Streamlit dashboard (`dashboard/app.py`) drives the agent through the API. Start the API first,
+then the dashboard, from the repo root in two terminals:
+
+```bash
+.venv/bin/uvicorn api.server:app --port 8000
+.venv/bin/streamlit run dashboard/app.py
+```
+
+Open http://localhost:8501, set the duty scenario in the sidebar and press **Run MarginGuard**. That
+sends the scenario to `POST /run` with `reset: true` (store prices restored, outbox cleared). The
+page polls the API every 1.5 seconds and shows:
+
+- **Agent activity**: every step of the run in order, newest at the bottom: each tool call by
+  MarginGuard or SupplierNegotiator with its status, the `load_cost_sheet` and `calc_margins` steps
+  run inside `evaluate_pricing_rules` and `apply_price_changes`, prices written, emails filed, and
+  the reports. "Not started" before the first run.
+- **Approvals**: the pending price changes or supplier email drafts, each with an approve/reject
+  toggle, and one submit button (`POST /approve`).
+- **KPIs, pricing decisions and margin chart** from `GET /plan` (margins today, under the tariff
+  and after approved changes; dashed line at the 56% review threshold).
+- **Supplier outbox**: approved email drafts from `GET /outbox`. Nothing is sent.
+- A **LIVE ZOODATA** or **SAMPLE** badge from the run's comparables `data_source`.
+
+The dashboard holds no keys and runs no pricing logic. Set `MARGINGUARD_API` if the API is not at
+`http://127.0.0.1:8000`.
+
+### API mode
+
+```bash
+.venv/bin/uvicorn api.server:app --port 8000
+```
+
+One run at a time. CORS allows the UI dev server at `http://localhost:3000` and
+`http://127.0.0.1:3000`; set `MARGINGUARD_CORS_ORIGINS` (comma-separated) to change that. Errors
+use the starter app's shape, `{"error": "<code>"}`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/run` | Start a run. Body `{"request": "...", "reset": false}`. `202`; `409 run_in_progress` if one is running. |
+| GET | `/events?since=0` | Event trace from index `since`; `next` is the index to poll from next. Before the first run: `200` with `status: "not_started"` and no events. |
+| GET | `/pending` | The price changes or supplier email drafts waiting for a decision, if any. |
+| POST | `/approve` | Decide every pending item. Body `{"decisions": {"<sku>": true\|false}}`. |
+| GET | `/plan` | Per-SKU decisions and margins, comparables, baseline, scenario and applied totals, `data_source` (fills in as the run goes). |
+| GET | `/report` | Final report, applied and rejected changes, exposure, estimated recovery. `409 report_not_ready` until the run ends. |
+| GET | `/prices` | Current `data/store_prices.json`. |
+| GET | `/outbox` | Approved supplier email drafts in `data/outbox/`. None are sent. |
+
+Run status moves `running` → `awaiting_approval` → `running` → `succeeded` or `failed`.
+
+**POST /run**
+
+```json
+{ "request": "Duty goes from 12% to 37% on all products. What should we do?", "reset": true }
+```
+```json
+{ "status": "running", "request": "Duty goes from 12% to 37% on all products. What should we do?", "reset": true }
+```
+
+**GET /events?since=48**
+
+```json
+{
+  "status": "succeeded",
+  "error": null,
+  "session_id": "96bf6114f85f46cabc9aa2ae81a6e349",
+  "events": [
+    { "seq": 48, "t": 28.8, "label": "price.skipped", "detail": "DJ-02 -> 81 (rejected by reviewer)" },
+    { "seq": 49, "t": 28.8, "label": "local.result", "detail": "apply_price_changes: applied 4, rejected 1, ..." }
+  ],
+  "next": 54
+}
+```
+
+**GET /pending**
+
+```json
+{
+  "status": "awaiting_approval",
+  "pending": true,
+  "kind": "price_changes",
+  "emails": [],
+  "changes": [
+    { "sku": "LP-02", "old_price": 48, "new_price": 53, "reason": "Below Pants median $64; capped at +10% to $53" },
+    { "sku": "DJ-02", "old_price": 74, "new_price": 81, "reason": "Below Jackets median $82; capped at +10% to $81" }
+  ]
+}
+```
+
+During the supplier step, `kind` is `"supplier_emails"`, `changes` is empty and `emails` holds
+the drafts (addresses come from `data/suppliers.csv`). Approve them with the same `POST /approve`.
+
+```json
+{
+  "status": "awaiting_approval",
+  "pending": true,
+  "kind": "supplier_emails",
+  "changes": [],
+  "emails": [
+    { "sku": "CD-03", "supplier": "Dhaka Garments Ltd", "to": "sales@dhaka-garments.example.com",
+      "subject": "CD-03 unit-cost request — 12-month volume agreement", "body": "Dear Dhaka Garments Ltd, ..." }
+  ]
+}
+```
+
+**POST /approve** must include every pending SKU (`400 decisions_mismatch` lists `missing` and
+`unknown` SKUs; `409 no_pending_approval` when nothing is waiting). Answer within about 9.5
+minutes, or every change is rejected (ZooWork denies an unanswered approval after 10 minutes).
+
+```json
+{ "decisions": { "LP-01": true, "LP-02": true, "CD-01": true, "CD-02": true, "DJ-02": false } }
+```
+```json
+{ "approved": ["CD-01", "CD-02", "LP-01", "LP-02"], "rejected": ["DJ-02"] }
+```
+
+**GET /plan**
+
+```json
+{
+  "status": "awaiting_approval",
+  "decisions": [
+    { "sku": "LP-02", "name": "Linen Drawstring Pant", "category": "Pants", "action": "REPRICE",
+      "current_price": 48, "new_price": 53, "median": 64, "tariff_margin": 0.6719,
+      "reason": "Below Pants median $64; capped at +10% to $53" },
+    { "sku": "CD-03", "name": "Wrap Shirt Dress", "category": "Dresses", "action": "REVIEW",
+      "current_price": 64, "new_price": 64, "median": 72, "tariff_margin": 0.5505,
+      "reason": "Tariff margin 55.0% is below 56%; flag for sourcing review, do not reprice" }
+  ],
+  "reprice_prices": { "LP-01": 64, "LP-02": 53, "CD-01": 72, "CD-02": 48, "DJ-02": 81 },
+  "comparables": {
+    "women linen pants": { "n": 7, "low": 42, "median": 64, "high": 98, "data_source": "sample_fallback" }
+  },
+  "baseline_totals": { "exposure": 10317.5, "recovery": 0.0, "blended_margin": 0.6438 },
+  "scenario_totals": { "exposure": 10317.5, "recovery": 7425.05, "blended_margin": 0.6624 },
+  "scenario_input": { "duty_old": 0.12, "duty_new": 0.37, "volume_drop": 0.02, "prices": { "LP-01": 64 } }
+}
+```
+
+**GET /report**
+
+```json
+{
+  "status": "succeeded",
+  "error": null,
+  "request": "Duty goes from 12% to 37% on all products. What should we do?",
+  "report": "## Recommended action\n...",
+  "applied": [ { "sku": "LP-01", "old_price": 58, "new_price": 64 } ],
+  "rejected": [ { "sku": "DJ-02", "new_price": 81.0, "status": "rejected by reviewer" } ],
+  "exposure": 10317.5,
+  "estimated_recovery": 6378.06
+}
+```
+
+`estimated_recovery` covers only the approved changes. `negotiation` holds the supplier step:
+`targets` (supplier, `current_cost`, `target_cost`, `reduction_pct` per REVIEW SKU), `written` and
+`rejected` drafts, and `emails_sent: false`. `timings` lists the phases with their seconds,
+plus `agent_seconds` and `human_seconds` (time spent waiting for approvals).
+
+**GET /prices**
+
+```json
+{ "LP-01": 64, "LP-02": 53, "LP-03": 78, "CD-01": 72, "CD-02": 48, "CD-03": 64, "CD-04": 82, "DJ-01": 79, "DJ-02": 74, "DJ-03": 118 }
+```
+
+**GET /outbox**
+
+```json
+{
+  "sent": false,
+  "emails": [
+    { "sku": "CD-03", "path": "data/outbox/CD-03.md",
+      "content": "To: Dhaka Garments Ltd <sales@dhaka-garments.example.com>\nSubject: ...\nApproved: 2026-11-07 17:04 UTC (outbox only, not sent)\n\nDear Dhaka Garments Ltd, ..." }
+  ]
+}
+```

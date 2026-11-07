@@ -6,6 +6,10 @@ Order, using the tariff-scenario margin at the current price (calc_margins margi
              new price = min(median, round(current_price * 1.10)) in whole dollars,
              only if the increase is at least $2; otherwise ABSORB.
   c) ABSORB  otherwise.
+
+It also returns the calc_margins totals the agent needs, so the agent does not call
+calc_margins itself: baseline_totals (current prices, no volume drop; `exposure`) and
+plan_totals (all REPRICE prices with `volume_drop`; full-plan `recovery`).
 """
 
 from __future__ import annotations
@@ -28,17 +32,24 @@ def _round_dollars(value: float) -> int:
     return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def evaluate_pricing_rules(params: dict[str, Any]) -> dict[str, Any]:
-    """params: duty_old, duty_new, medians {cost-sheet category: comparable median}."""
+def evaluate_pricing_rules(
+    params: dict[str, Any], base_prices: dict[str, float] | None = None
+) -> dict[str, Any]:
+    """params: duty_old, duty_new, medians {cost-sheet category: comparable median},
+    volume_drop (default 0.02) for plan_totals.
+
+    base_prices: the run's starting price snapshot; defaults to data/store_prices.json.
+    """
     medians = {str(k).lower(): float(v) for k, v in (params.get("medians") or {}).items()}
-    rows = load_cost_sheet()
+    rows = load_cost_sheet(base_prices=base_prices)
     missing = sorted({r["category"] for r in rows if r["category"].lower() not in medians})
     if missing:
         raise ValueError(f"Missing medians for categories: {', '.join(missing)}")
 
-    margins = calc_margins(
-        {"duty_old": params["duty_old"], "duty_new": params["duty_new"], "prices": {}, "volume_drop": 0}
-    )["skus"]
+    duties = {"duty_old": params["duty_old"], "duty_new": params["duty_new"]}
+    volume_drop = float(params.get("volume_drop", 0.02))
+    baseline = calc_margins({**duties, "prices": {}, "volume_drop": 0}, base_prices=base_prices)
+    margins = baseline["skus"]
 
     decisions = []
     for r in rows:
@@ -86,9 +97,16 @@ def evaluate_pricing_rules(params: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    reprice_prices = {d["sku"]: d["new_price"] for d in decisions if d["action"] == "REPRICE"}
+    plan = calc_margins(
+        {**duties, "prices": reprice_prices, "volume_drop": volume_drop}, base_prices=base_prices
+    )
     return {
         "decisions": decisions,
-        "reprice_prices": {d["sku"]: d["new_price"] for d in decisions if d["action"] == "REPRICE"},
+        "reprice_prices": reprice_prices,
+        "baseline_totals": baseline["totals"],
+        "plan_totals": plan["totals"],
+        "plan_input": {**duties, "prices": reprice_prices, "volume_drop": volume_drop},
         "rules": {
             "review_below_margin": REVIEW_MARGIN,
             "markup_cap": MARKUP_CAP,

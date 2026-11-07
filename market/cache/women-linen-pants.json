@@ -1,0 +1,132 @@
+{
+  "category": "women linen pants",
+  "n": 20,
+  "low": 13.52,
+  "high": 36.99,
+  "median": 25.98,
+  "listings": [
+    {
+      "title": "LOMON Linen Pants Women Wide Leg Cotton Summer Pockets Pants Beach Vacation Medium White",
+      "price": 24.99,
+      "change_90d": -0.167,
+      "rating": 3.7
+    },
+    {
+      "title": "LOMON Linen Pants Women Wide Leg Cotton Summer Pockets Pants Beach Vacation Small White",
+      "price": 24.99,
+      "change_90d": -0.167,
+      "rating": 3.7
+    },
+    {
+      "title": "Hooever Women High Waisted Wide Leg Linen Pants Button Fly Trousers Small Apricot",
+      "price": 29.99,
+      "change_90d": -0.143,
+      "rating": 3.6
+    },
+    {
+      "title": "SeeLuNa Cotton Linen Pants for Women Palazzo Pants Wide Leg Lounge Trousers Medium Apricot",
+      "price": 29.74,
+      "change_90d": 0.144,
+      "rating": 3.8
+    },
+    {
+      "title": "FireSwan Linen Pants Women Drawstring Elastic Waist Wide Leg Palazzo Pants Small Black",
+      "price": 14.99,
+      "change_90d": 0.0,
+      "rating": 3.9
+    },
+    {
+      "title": "Tanming Cotton Linen Pants for Women Summer Casual Trousers Khaki03 Medium",
+      "price": 19.99,
+      "change_90d": -0.216,
+      "rating": 4.0
+    },
+    {
+      "title": "Linen Pants for Women Boho High Waist Wide Leg Flowy Palazzo Pants Small White",
+      "price": 13.52,
+      "change_90d": -0.033,
+      "rating": 4.0
+    },
+    {
+      "title": "CHARTOU Polka Dot Wide Leg Barrel Pants for Women Baggy Palazzo Pant Drawstring High Waist Cotton Linen Lounge Pants Large Brown",
+      "price": 26.97,
+      "change_90d": 0.0,
+      "rating": 4.2
+    },
+    {
+      "title": "Tanming Cotton Linen Pants for Women Summer Casual Trousers Khaki03 Large",
+      "price": 19.99,
+      "change_90d": -0.22,
+      "rating": 4.0
+    },
+    {
+      "title": "Hooever Women High Waisted Wide Leg Linen Pants Button Fly Trousers Medium Khaki",
+      "price": 36.99,
+      "change_90d": 0.233,
+      "rating": 3.6
+    },
+    {
+      "title": "Hooever Women High Waisted Wide Leg Linen Pants Button Fly Trousers Large White",
+      "price": 29.99,
+      "change_90d": null,
+      "rating": 3.6
+    },
+    {
+      "title": "Hooever Women High Waisted Wide Leg Linen Pants Button Fly Trousers Medium Black",
+      "price": 29.99,
+      "change_90d": null,
+      "rating": 3.6
+    },
+    {
+      "title": "Hooever Women High Waisted Wide Leg Linen Pants Button Fly Trousers Large Apricot",
+      "price": 36.99,
+      "change_90d": null,
+      "rating": 3.6
+    },
+    {
+      "title": "Hooever Women High Waisted Wide Leg Linen Pants Button Fly Trousers X-Small Apricot",
+      "price": 29.99,
+      "change_90d": null,
+      "rating": 3.6
+    },
+    {
+      "title": "Women Casual Lightweight Drawstring Elastic Waist Cropped Linen Pants Fall Spring Slacks Capri Pants Trendy Fashion 2026 Beach Trousers with Pockets Khaki Large",
+      "price": 29.99,
+      "change_90d": null,
+      "rating": 3.5
+    },
+    {
+      "title": "LOMON Linen Pants Women Wide Leg Cotton Summer Pockets Pants Beach Vacation Large Black",
+      "price": 32.99,
+      "change_90d": null,
+      "rating": 3.7
+    },
+    {
+      "title": "LOMON Linen Pants Women Wide Leg Cotton Summer Pockets Pants Beach Vacation X-Large White",
+      "price": 19.99,
+      "change_90d": null,
+      "rating": 3.7
+    },
+    {
+      "title": "LOMON Linen Pants Women Wide Leg Cotton Summer Pockets Pants Beach Vacation Medium Black",
+      "price": 19.99,
+      "change_90d": null,
+      "rating": 3.7
+    },
+    {
+      "title": "LOMON Linen Pants Women Wide Leg Cotton Summer Pockets Pants Beach Vacation Large Khaki",
+      "price": 19.99,
+      "change_90d": null,
+      "rating": 3.7
+    },
+    {
+      "title": "Wide Leg Palazzo Pants for Women Casual Drawstring Flowy Beach Linen Trousers with Pockets Vacation Large White",
+      "price": 19.99,
+      "change_90d": null,
+      "rating": 4.1
+    }
+  ],
+  "data_source": "live_zoodata",
+  "source_detail": "ZooData products/search (Amazon US) + products/history",
+  "fetched_at": "2026-11-07"
+}
