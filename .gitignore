@@ -27,3 +27,5 @@ npm-debug.log*
 __pycache__/
 agent/.agent_id
 agent/.agent_config_hash
+agent/.advisor_agent_id
+agent/.advisor_config_hash

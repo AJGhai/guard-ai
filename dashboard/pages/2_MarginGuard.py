@@ -1,7 +1,7 @@
 """MarginGuard dashboard: tariff scenario -> pricing decisions -> human approval.
 
 Run from the repo root:
-    .venv\\Scripts\\streamlit run dashboard/app.py
+    .venv\\Scripts\\streamlit run dashboard/Product_to_PO.py (MarginGuard is the second page)
 
 Uses the same tools as agent/run.py (margins, comparables, pricing rules) and writes approved
 changes to data/store_prices.json. It makes no ZooWork calls; live ZooData comparables are
@@ -22,7 +22,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
