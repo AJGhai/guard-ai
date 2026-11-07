@@ -8,6 +8,9 @@ so accents() returns the same colours as plain strings.
 
 from __future__ import annotations
 
+import base64
+from pathlib import Path
+
 import streamlit as st
 
 # Dark-theme accents, kept as module constants for older imports. Pages should call accents() instead,
@@ -106,7 +109,7 @@ _RULES = """
   .brandbar { display: flex; align-items: center; gap: 18px; padding: 14px 20px; border-radius: 20px;
     background: linear-gradient(135deg, var(--mg-yellow-soft) 0%, var(--mg-yellow) 100%);
     border: 1px solid var(--mg-border); box-shadow: 0 3px 10px rgba(20, 40, 75, 0.10); margin-bottom: 0.9rem; }
-  .brandbar svg { flex: none; filter: drop-shadow(0 2px 3px rgba(20, 40, 75, 0.25)); }
+  .brandbar img { flex: none; filter: drop-shadow(0 2px 3px rgba(20, 40, 75, 0.25)); }
   .brandbar .wordmark { font-size: 2.3rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05;
     color: var(--mg-text); }
   .brandbar .wordmark span { color: var(--mg-blue); }
@@ -153,35 +156,22 @@ def hero(title: str, lede: str, hint: str = "", badge_html: str = "") -> None:
     st.markdown(f'<div class="hero"><div class="lede">{lede}</div>{hint_html}</div>', unsafe_allow_html=True)
 
 
-LOGO_SVG = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" width="{w}" height="{h}" role="img" '
-    'aria-label="MargeAI logo">'
-    '<rect x="2" y="2" width="96" height="116" rx="26" fill="#FFE169"/>'
-    '<g stroke="#173F86" stroke-width="2.6" stroke-linejoin="round" fill="#2F6FDB">'
-    '<path d="M24 94 C12 96 7 82 14 72 C16 82 21 85 29 84 Z"/>'
-    '<path d="M76 94 C88 96 93 82 86 72 C84 82 79 85 71 84 Z"/>'
-    '<path d="M22 98 C15 80 16 56 21 38 C26 18 37 7 50 7 C63 7 74 18 79 38 C84 56 85 80 78 98 '
-    'C70 105 30 105 22 98 Z"/></g>'
-    '<g fill="none" stroke="#9CC4FF" stroke-width="2.6" stroke-linecap="round">'
-    '<path d="M50 10 C41 22 37 38 39 56"/><path d="M50 10 C59 22 63 38 61 56"/>'
-    '<path d="M43 11 C33 23 29 40 30 58"/><path d="M57 11 C67 23 71 40 70 58"/></g>'
-    '<path d="M31 36 C33 26 39 19 45 15" fill="none" stroke="#DCEBFF" stroke-width="3.2" stroke-linecap="round"/>'
-    '<text x="50" y="79" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" '
-    'font-weight="900" font-size="13" fill="#FFFFFF" letter-spacing="0.5">MARGE</text>'
-    '<text x="50" y="94" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" '
-    'font-weight="900" font-size="15" fill="#FFE169">AI</text></svg>'
-)
+_MARK = Path(__file__).resolve().parent / "assets" / "margeai-mark.png"
 
 
 def logo_svg(height: int = 64) -> str:
-    """The MargeAI logo (an original tall blue beehive hairdo with the name inside, on a yellow badge)."""
-    return LOGO_SVG.format(w=round(height * 100 / 120), h=height)
+    """The MargeAI mark (updo, cantaloupe and swirl) as an inline image. Name kept from the old SVG logo."""
+    try:
+        data = base64.b64encode(_MARK.read_bytes()).decode("ascii")
+    except OSError:
+        return ""
+    return f'<img src="data:image/png;base64,{data}" height="{height}" alt="MargeAI logo" style="height:{height}px;width:auto">'
 
 
 def brand_header(lede: str, hint: str = "") -> None:
     """The MargeAI banner: logo, wordmark and tagline, then one plain sentence on what the page does."""
     st.markdown(
-        f'<div class="brandbar">{logo_svg(96)}<div><div class="wordmark">Marge<span>AI</span></div>'
+        f'<div class="brandbar">{logo_svg(110)}<div><div class="wordmark">Marge<span>AI</span></div>'
         f'<div class="tagline">The AI co-pilot that minds your margin.</div></div></div>',
         unsafe_allow_html=True,
     )
