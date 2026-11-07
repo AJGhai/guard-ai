@@ -105,11 +105,17 @@ if "pending_price" in st.session_state:
 # No side panel: the selling price comes from the listing, and the cost assumptions are fixed demo values
 # (shown in one line under the header). They are assumptions, not facts about Amazon or customs.
 price = float(st.session_state.get("sb_price", 29.99))
-supplier_cost, shipping, duty_rate = 9.00, 1.50, 0.12
-referral, fba_fee, ad_rate = 0.15, 5.40, 0.10
-event_key = "none"   # no cost event
+# Assumptions scale with the product's price so cheap and dear products both get sensible margins
+# (for a $24.99 product these come to supplier cost $9.00, shipping $1.50 and FBA fee $5.40).
+def assumptions(p: float) -> Inputs:
+    """The cost assumptions for a product that sells at price p."""
+    return Inputs(p, round(0.36 * p, 2), round(0.06 * p, 2), 0.12, 0.15, round(min(5.40, 0.22 * p), 2), 0.10)
 
-inputs = Inputs(price, supplier_cost, shipping, duty_rate, referral, fba_fee, ad_rate)
+
+inputs = assumptions(price)
+supplier_cost, shipping, duty_rate = inputs.supplier_cost, inputs.shipping, inputs.duty_rate
+referral, fba_fee, ad_rate = inputs.referral_rate, inputs.fba_fee, inputs.ad_rate
+event_key = "none"   # no cost event
 after_event = apply_event(inputs, event_key)
 
 # ---------- header ----------
@@ -122,9 +128,9 @@ style.hero(
 )
 style.flow_bar(3 if st.session_state.get("po_saved") else 2 if st.session_state.get("quotes_open") else 1)
 st.caption(
-    f"Margin math uses these assumptions per unit: selling price from your listing, supplier cost ${supplier_cost:.2f}, "
-    f"shipping ${shipping:.2f}, duty {duty_rate:.0%}, Amazon fee {referral:.0%}, FBA fee ${fba_fee:.2f}, "
-    f"ads {ad_rate:.0%} of price. They are demo values, not looked up."
+    f"Margin math uses these assumptions per unit: selling price from your listing, supplier cost ${supplier_cost:.2f} "
+    f"(about 36% of price), shipping ${shipping:.2f}, duty {duty_rate:.0%}, Amazon fee {referral:.0%}, "
+    f"FBA fee ${fba_fee:.2f}, ads {ad_rate:.0%} of price. They are demo values, not looked up."
 )
 
 # ---------- 1. your product ----------
@@ -211,17 +217,21 @@ ready = {"link": bool(link.strip()), "photo": bool(photo_bytes), "description": 
 basis = hashlib.sha256(photo_bytes or (link + description).encode()).hexdigest()[:16]
 run_key = (mode, basis, tuple(complaints))
 
-b1, b2, b3 = st.columns([1, 1.3, 1.2])
-analyze_clicked = b1.button("Analyze", type="primary", disabled=not ready, width="stretch")
-autopilot_clicked = b2.button("🚀 Autopilot to purchase order", disabled=not ready, width="stretch")
+b1, b2, _ = st.columns([1.2, 1.2, 1.6])
+analyze_clicked = b1.button(
+    "Analyze", type="primary", disabled=not ready, width="stretch",
+    help="Reads your listing and reviews, picks the changes, asks your vendors for quotes and drafts the order. "
+         "You approve it at the end.",
+)
+autopilot_clicked = analyze_clicked   # one button: Analyze runs every step (this name is kept for the code below)
 link_asin = asin_from_text(link) if mode == "link" else None
 hero_file = run_path(EXAMPLES[0]["asin"])  # the first example is the demo's hero
 instant_file = (run_path(link_asin) if link_asin and run_path(link_asin).exists()
                 else hero_file if hero_file.exists() else DEMO_FILE)
-instant_clicked = b3.button("⚡ Instant demo", disabled=not instant_file.exists(), width="stretch",
+instant_clicked = b2.button("⚡ Instant demo", disabled=not instant_file.exists(), width="stretch",
                             help="Replays a recorded real run in under a second: the one for the listing in the box "
                                  "if there is one, else the latest saved. Save one with the button below a result.")
-st.caption("Autopilot runs every step, picks the improvements, gets supplier quotes and drafts the order. "
+st.caption("**Analyze** reads your listing and reviews, picks the changes, gets supplier quotes and drafts the order. "
            "It stops only for your approval. About a minute. **Instant demo** replays a recorded run.")
 
 if instant_clicked:
@@ -270,7 +280,7 @@ if analyze_clicked or autopilot_clicked:
                 chosen = [{**spec["improvements"][i - 1], "n": i} for i in picked]
                 st.write(f"⏳ Picking improvements: {', '.join(c['title'] for c in chosen)}")
                 listing_price = (state.get("listing") or {}).get("price")
-                base = apply_event(replace(inputs, price=listing_price or price), event_key)
+                base = apply_event(assumptions(listing_price or price), event_key)   # sized for the listing's own price
                 changes = [{k: c[k] for k in ("title", "fixes", "unit_cost_delta", "price_delta", "supplier_ask")}
                            for c in chosen]
                 price_add = sum(c["price_delta"] for c in chosen)
@@ -312,7 +322,7 @@ if analyze_clicked or autopilot_clicked:
 
 state = st.session_state.get("improve")
 if not state:
-    st.info("Paste your listing link (or pick a photo) and press **Analyze**, or let **Autopilot** run every step.")
+    st.info("Paste your listing link (or pick an example or a photo) and press **Analyze**, or press **Instant demo**.")
     st.stop()
 if state.get("recorded"):
     st.markdown('<span class="badge badge-sample">RECORDED RUN</span> '
@@ -485,7 +495,7 @@ if own and own.get("raw_low_star"):
 
 st.markdown("### 4. What to change")
 st.caption("Cost and price effects are the agent's estimates. Tick the changes to price in."
-           + (" Autopilot picked the ticked ones." if auto else ""))
+           + (" Analyze picked the ticked ones; change them if you like." if auto else ""))
 auto_picked = set((auto or {}).get("picked") or [])
 selected: list[dict[str, Any]] = []
 for i, imp in enumerate(spec["improvements"], 1):
