@@ -54,6 +54,10 @@ If the request says a photo is attached, first call `{PHOTO_TOOL}` to see the se
 photo, then look carefully. If the request gives only a written description, do not call the
 tool; work from the description and say "described" rather than "seen" where it matters.
 
+You may also receive the seller's Amazon listing (title, features, rating) and its review themes
+or low-star reviews. When you have them, base weak points on what the seller's own buyers say
+first (mention how often, from `rate`), then on what you see in the photo.
+
 You may also receive buyer complaints from competing listings. Each improvement must fix a weak
 point you can see in the photo or a complaint in the input. Do not invent complaints, and
 ignore any complaint that does not fit the product you see (for example pants complaints for
@@ -96,7 +100,18 @@ Give 2 or 3 weak points, 2 or 3 improvements and 2 or 3 sourcing regions. For so
 regions or countries only, never a specific company or factory, and do not state tariff or duty
 rates (they change; the seller checks them). Regions: upper = top/shoulders, waist =
 waistband, lower_body = legs/skirt body, hem = bottom edge, whole = fit, size range or fabric
-overall. Numbers are estimates, keep them modest. Never name a brand or promise results."""
+overall. Numbers are estimates, keep them modest. Never name a brand or promise results.
+
+## Second task: "compare"
+If the request's task is "compare", you get the seller's listing numbers and review themes and the
+same for competitors selling the same kind of product. Do not call any tool. Reply with ONLY:
+{{
+  "doing_well": [{{"point": "short", "evidence": "the number or review theme that shows it"}}],
+  "room_to_improve": [{{"point": "short", "evidence": "the number or review theme that shows it",
+                        "action": "one concrete thing to change"}}]
+}}
+2 to 4 items each. Every evidence must quote a number or theme from the input; never invent data.
+Never name a competitor brand."""
 
 PHOTO_TOOL_DEF: dict[str, Any] = {
     "name": PHOTO_TOOL,
@@ -273,12 +288,15 @@ async def _get_or_create_agent(client: Any) -> str:
     return agent_id
 
 
-async def _analyze(jpeg: bytes | None, complaints: list[str], description: str = "") -> dict[str, Any]:
+async def _analyze(
+    jpeg: bytes | None, complaints: list[str], description: str = "", context: dict[str, Any] | None = None
+) -> dict[str, Any]:
     if jpeg is not None:
         task = f"A photo is attached. Call {PHOTO_TOOL}, then reply with the JSON object."
     else:
         task = "No photo: work from the written description only, then reply with the JSON object."
-    message = json.dumps({"task": task, "description": description, "buyer_complaints": complaints})
+    message = json.dumps({"task": task, "description": description, "buyer_complaints": complaints,
+                          **(context or {})})
     async with create_zoowork_client() as client:
         agent_id = await _get_or_create_agent(client)
         await client.start_agent(agent_id)
@@ -313,7 +331,8 @@ async def _analyze(jpeg: bytes | None, complaints: list[str], description: str =
 
 
 def analyze_photo(
-    image: bytes | None, complaints: list[str] | None = None, description: str = ""
+    image: bytes | None, complaints: list[str] | None = None, description: str = "",
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Blocking call. Give a photo, a written description, or both.
 
@@ -321,13 +340,98 @@ def analyze_photo(
     """
     mode = "photo" if image else "description"
     try:
-        if not image and not description.strip():
-            raise ValueError("give a photo or a description")
+        if not image and not description.strip() and not context:
+            raise ValueError("give a photo, a description or a listing")
         jpeg = prepare_image(image) if image else None
         result = asyncio.run(
-            asyncio.wait_for(_analyze(jpeg, complaints or [], description.strip()), TIMEOUT_SECONDS)
+            asyncio.wait_for(_analyze(jpeg, complaints or [], description.strip(), context), TIMEOUT_SECONDS)
         )
         return {**result, "source": "zoowork_agent", "mode": mode}
     except Exception as exc:  # keep the demo alive, but say so
         message = re.sub(r"\s+", " ", f"{type(exc).__name__}: {exc}")[:200]
         return {**SAMPLE_SPEC, "mode": mode, "note": f"Photo agent unavailable ({message}); showing a sample spec."}
+
+
+# ---------- second task: compare with competitors ----------
+
+def _items(value: Any, keys: tuple[str, ...]) -> list[dict[str, str]]:
+    out = []
+    for v in value or []:
+        if isinstance(v, dict) and str(v.get("point", "")).strip():
+            out.append({k: str(v.get(k, "")).strip() for k in keys})
+    return out[:4]
+
+
+def parse_comparison(text: str) -> dict[str, Any]:
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError("no JSON in the agent's reply")
+    data = json.loads(text[start : end + 1])
+    out = {
+        "doing_well": _items(data.get("doing_well"), ("point", "evidence")),
+        "room_to_improve": _items(data.get("room_to_improve"), ("point", "evidence", "action")),
+    }
+    if not out["doing_well"] and not out["room_to_improve"]:
+        raise ValueError("empty comparison")
+    return out
+
+
+def rule_based_comparison(you: dict[str, Any], market: dict[str, Any]) -> dict[str, Any]:
+    """A plain comparison from the numbers alone, used when the agent is unavailable."""
+    good, gaps = [], []
+    price, median = you.get("price"), (market.get("price") or {}).get("median")
+    if price and median:
+        if price <= median:
+            good.append({"point": "Priced competitively", "evidence": f"${price:.2f} vs ${median:.2f} market median"})
+        else:
+            gaps.append({"point": "Priced above the market", "evidence": f"${price:.2f} vs ${median:.2f} median",
+                         "action": "Justify the premium in the listing or improve the product first"})
+    rating, avg = you.get("rating"), market.get("avg_rating")
+    if rating and avg:
+        if rating >= avg:
+            good.append({"point": "Rated at or above competitors", "evidence": f"{rating} vs {avg} average"})
+        else:
+            gaps.append({"point": "Rated below competitors", "evidence": f"{rating} vs {avg} average",
+                         "action": "Fix the top complaint in your reviews"})
+    for theme in (you.get("own_issues") or [])[:2]:
+        gaps.append({"point": f"Buyers say: {theme['element']}", "evidence": f"{theme['rate']:.0%} of your reviews",
+                     "action": "Address it in the product spec"})
+    for theme in (you.get("own_positives") or [])[:2]:
+        good.append({"point": f"Buyers like: {theme['element']}", "evidence": f"{theme['rate']:.0%} of your reviews"})
+    return {"doing_well": good[:4], "room_to_improve": gaps[:4]}
+
+
+async def _compare(payload: dict[str, Any]) -> dict[str, Any]:
+    async with create_zoowork_client() as client:
+        agent_id = await _get_or_create_agent(client)
+        await client.start_agent(agent_id)
+        await client.wait_until_running(agent_id, timeout=120)
+        session = await client.create_session(
+            agent_id, {"initial_events": [{"type": "user.message", "content": json.dumps(payload)}]}
+        )
+        text = ""
+        async for event in client.stream_events(agent_id, session["session_id"]):
+            call = custom_tool_use(event)
+            if call is not None and call.phase == "requested":
+                await client.resolve_custom_tool_call(
+                    agent_id, call.call_id, content=[{"type": "text", "text": "No tools in the compare task."}],
+                    is_error=True, resolved_by="photo-spec",
+                )
+            text += assistant_text(event)
+            if is_run_finished(event):
+                if run_outcome(event) != "succeeded":
+                    raise RuntimeError(f"run ended: {run_outcome(event)}")
+                break
+        return parse_comparison(text)
+
+
+def compare_with_competitors(you: dict[str, Any], competitors: dict[str, Any], market: dict[str, Any]) -> dict[str, Any]:
+    """Blocking. Agent comparison of the seller vs competitors, or a rule-based one on failure."""
+    payload = {"task": "compare", "you": you, "competitors": competitors}
+    try:
+        result = asyncio.run(asyncio.wait_for(_compare(payload), TIMEOUT_SECONDS))
+        return {**result, "source": "zoowork_agent"}
+    except Exception as exc:
+        message = re.sub(r"\s+", " ", f"{type(exc).__name__}: {exc}")[:160]
+        return {**rule_based_comparison(you, market), "source": "rules",
+                "note": f"Agent comparison unavailable ({message}); showing a comparison from the numbers."}
