@@ -25,6 +25,7 @@ import json
 import shutil
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +81,9 @@ c) Otherwise ABSORB.
    new prices and reasons as given.
 5. Recalculate the plan with `calc_margins`, passing `reprice_prices` from step 4 and
    `volume_drop: 0.02`.
-6. If there are REPRICE items, call `apply_price_changes` once with all of them, passing
+6. If there are REPRICE items, always call `apply_price_changes` once with all of them. Do not
+   stop to ask the user whether to submit them: the tool itself asks a human to approve or
+   reject each change, and only approved changes are written. Pass
    `scenario` with the same duty rates and volume_drop 0.02. Use each SKU's `reason` from
    `evaluate_pricing_rules` word for word; it cites the competitor median and says when the
    +10% cap limited the price.
@@ -99,6 +102,8 @@ c) Otherwise ABSORB.
 - Never do arithmetic yourself. Every margin, price, exposure, recovery or total you report must
   come from a tool result.
 - Do not retry a rejected price change.
+- Finish the whole workflow in one turn, including `apply_price_changes`; never end the turn
+  with a question about whether to submit the changes.
 - Amounts from `calc_margins` are per month.
 """
 
@@ -225,7 +230,7 @@ AGENT_CONFIG: dict[str, Any] = {
 }
 
 
-# ---------- output helpers ----------
+# ---------- helpers ----------
 
 def fmt(price: Any) -> str:
     return f"{price:g}" if isinstance(price, (int, float)) else str(price)
@@ -236,16 +241,6 @@ def short(value: Any, limit: int = 140) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
-START = time.monotonic()
-
-
-def trace(label: str, detail: str = "") -> None:
-    elapsed = time.monotonic() - START
-    print(f"[{elapsed:6.1f}s] {label:<22} {detail}".rstrip(), flush=True)
-
-
-# ---------- local data ----------
-
 def read_prices() -> dict[str, float]:
     return json.loads(PRICES_FILE.read_text())
 
@@ -254,16 +249,38 @@ def write_prices(prices: dict[str, float]) -> None:
     PRICES_FILE.write_text(json.dumps(prices, indent=2) + "\n")
 
 
-def parse_changes(raw: Any) -> list[dict[str, Any]]:
-    """Normalize tool arguments (dict or JSON string) into a list of changes."""
+def reset_prices() -> None:
+    shutil.copyfile(ORIGINAL_PRICES_FILE, PRICES_FILE)
+
+
+def parse_args(raw: Any) -> dict[str, Any]:
     if isinstance(raw, str):
         raw = json.loads(raw)
-    changes = (raw or {}).get("changes") or []
+    return raw if isinstance(raw, dict) else {}
+
+
+def parse_changes(raw: Any) -> list[dict[str, Any]]:
+    """Normalize tool arguments (dict or JSON string) into a list of changes."""
+    changes = parse_args(raw).get("changes") or []
     return [c for c in changes if isinstance(c, dict)]
 
 
-def change_key(change: dict[str, Any]) -> tuple[str, float]:
-    return (str(change.get("sku")), float(change.get("new_price")))
+def describe_changes(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Changes as shown to a reviewer: sku, old_price, new_price, reason."""
+    prices = read_prices()
+    return [
+        {
+            "sku": str(c.get("sku")),
+            "old_price": prices.get(str(c.get("sku"))),
+            "new_price": c.get("new_price"),
+            "reason": c.get("reason", ""),
+        }
+        for c in changes
+    ]
+
+
+# An approver gets the described changes and returns {sku: approved}.
+Approver = Callable[[list[dict[str, Any]]], Awaitable[dict[str, bool]]]
 
 
 async def ask_yes_no(prompt: str) -> bool:
@@ -276,34 +293,28 @@ async def ask_yes_no(prompt: str) -> bool:
         print("  Please answer y or n.")
 
 
-async def review_changes(changes: list[dict[str, Any]]) -> dict[tuple[str, float], bool]:
-    """Ask the operator y/n for each change. Returns {(sku, new_price): approved}."""
-    prices = read_prices()
-    decisions: dict[tuple[str, float], bool] = {}
+async def terminal_approver(changes: list[dict[str, Any]]) -> dict[str, bool]:
+    """Ask y/n in the terminal for each change."""
+    decisions: dict[str, bool] = {}
     print("\n=== Approval required: apply_price_changes ===")
-    for change in changes:
-        sku, new_price = change_key(change)
-        old = prices.get(sku, "unknown SKU")
-        print(f"  {sku}: {fmt(old)} -> {fmt(new_price)}   reason: {change.get('reason', '')}")
-        decisions[(sku, new_price)] = await ask_yes_no(
-            f"  Approve {sku} -> {fmt(new_price)}? [y/n] "
-        )
+    for c in changes:
+        print(f"  {c['sku']}: {fmt(c['old_price'])} -> {fmt(c['new_price'])}   reason: {c['reason']}")
+        decisions[c["sku"]] = await ask_yes_no(f"  Approve {c['sku']} -> {fmt(c['new_price'])}? [y/n] ")
     print()
     return decisions
 
 
-# ---------- custom tool execution ----------
-
-def run_apply_price_changes(
+def apply_price_changes(
     changes: list[dict[str, Any]],
-    decisions: dict[tuple[str, float], bool],
+    decisions: dict[str, bool],
     scenario: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Write only approved changes to data/store_prices.json."""
     prices = read_prices()
     applied, rejected = [], []
     for change in changes:
-        sku, new_price = change_key(change)
-        if not decisions.get((sku, new_price), False):
+        sku, new_price = str(change.get("sku")), float(change.get("new_price"))
+        if not decisions.get(sku, False):
             rejected.append({"sku": sku, "new_price": new_price, "status": "rejected by reviewer"})
         elif sku not in prices:
             rejected.append({"sku": sku, "new_price": new_price, "status": "unknown SKU"})
@@ -311,15 +322,14 @@ def run_apply_price_changes(
             rejected.append({"sku": sku, "new_price": new_price, "status": "invalid price"})
         else:
             old = prices[sku]
-            prices[sku] = int(new_price) if float(new_price).is_integer() else new_price
+            prices[sku] = int(new_price) if new_price.is_integer() else new_price
             applied.append({"sku": sku, "old_price": old, "new_price": prices[sku]})
     result: dict[str, Any] = {"applied": applied, "rejected": rejected}
     if scenario:
         # Measure recovery for the approved changes against the prices before this write.
-        totals = calc_margins(
+        result["applied_totals"] = calc_margins(
             {**scenario, "prices": {row["sku"]: row["new_price"] for row in applied}}
         )["totals"]
-        result["applied_totals"] = totals
     if applied:
         write_prices(prices)
     result["prices"] = prices
@@ -349,57 +359,25 @@ def summarize_result(name: str, result: dict[str, Any]) -> str:
     return short(result)
 
 
-async def execute_tool(
-    name: str | None,
-    args: dict[str, Any],
-    approved: dict[tuple[str, float], bool] | None,
-) -> dict[str, Any]:
-    try:
-        if name == "load_cost_sheet":
-            return {"rows": load_cost_sheet()}
-        if name == "calc_margins":
-            return calc_margins(args)
-        if name == "get_comparables":
-            return get_comparables(args)
-        if name == "evaluate_pricing_rules":
-            return evaluate_pricing_rules(args)
-        if name == "get_store_prices":
-            return read_prices()
-        if name == "apply_price_changes":
-            changes = parse_changes(args)
-            if approved is None:
-                # No approval event seen for this call: review locally before writing.
-                approved = await review_changes(changes)
-            raw = json.loads(args) if isinstance(args, str) else args
-            result = run_apply_price_changes(changes, approved, raw.get("scenario"))
-            for row in result["applied"]:
-                print(f"  [wrote]   {row['sku']}: {fmt(row['old_price'])} -> {fmt(row['new_price'])}")
-            for row in result["rejected"]:
-                print(f"  [skipped] {row['sku']} -> {fmt(row['new_price'])} ({row['status']})")
-            return result
-        return {"error": f"unknown tool {name}"}
-    except Exception as exc:  # report tool failures back to the model
-        return {"error": f"{type(exc).__name__}: {exc}"}
-
-
 # ---------- agent lifecycle ----------
 
 def config_fingerprint() -> str:
     return hashlib.sha256(json.dumps(AGENT_CONFIG, sort_keys=True).encode()).hexdigest()
 
 
-async def get_or_create_agent(client: ZooworkClient) -> str:
+async def get_or_create_agent(client: ZooworkClient) -> tuple[str, str]:
+    """Return (agent_id, what happened: existing / config_updated / created)."""
     fingerprint = config_fingerprint()
 
     if AGENT_ID_FILE.exists():
         agent_id = AGENT_ID_FILE.read_text().strip()
         stored = CONFIG_HASH_FILE.read_text().strip() if CONFIG_HASH_FILE.exists() else ""
-        if stored != fingerprint:
-            # Push the tools, approval policy and instructions only when they changed.
-            await client.update_agent(agent_id, AGENT_CONFIG)
-            CONFIG_HASH_FILE.write_text(fingerprint + "\n")
-            trace("agent.config_updated", agent_id)
-        return agent_id
+        if stored == fingerprint:
+            return agent_id, "existing"
+        # Push the tools, approval policy and instructions only when they changed.
+        await client.update_agent(agent_id, AGENT_CONFIG)
+        CONFIG_HASH_FILE.write_text(fingerprint + "\n")
+        return agent_id, "config_updated"
 
     models = await client.list_models()
     selectable = [m for m in models if m.get("selectable") is not False]
@@ -413,99 +391,203 @@ async def get_or_create_agent(client: ZooworkClient) -> str:
     agent_id = created["agent_id"]
     AGENT_ID_FILE.write_text(agent_id + "\n")
     CONFIG_HASH_FILE.write_text(fingerprint + "\n")
-    trace("agent.created", f"{agent_id} model={chosen['model']}")
-    return agent_id
+    return agent_id, "created"
 
 
-# ---------- event loop ----------
+# ---------- one run ----------
 
-def trace_event(event: SessionEvent) -> None:
-    p = event.payload
-    kind = event.event_type
-    if kind == "run.started":
-        trace("run.started", event.run_id or "")
-    elif kind == "agent.tool":
-        tc = tool_call(event)
-        if tc is None:
-            return
-        if tc.phase == "start":
-            trace("tool.start", f"{tc.tool_name} {short(tc.args or {})}")
-        elif tc.phase == "end":
-            trace("tool.end", f"{tc.tool_name}{' (error)' if tc.is_error else ''}")
-        else:
-            trace("tool.blocked", f"{tc.tool_name} reason={p.get('deniedReason')}")
-    elif kind == "agent.custom_tool_use":
-        call = custom_tool_use(event)
-        if call is None:
-            return
-        if call.phase == "requested":
-            trace("custom_tool.requested", f"{call.name} {short(call.input or {})}")
-        else:
-            trace("custom_tool.resolved", f"{call.name or call.call_id} outcome={call.outcome}")
-    elif kind == "agent.approval":
-        if p.get("phase") == "requested":
-            trace("approval.requested", f"{p.get('toolName')} approval={p.get('approvalId')}")
-        else:
-            trace("approval.resolved", f"{p.get('toolName') or ''} resolution={p.get('resolution')}")
-    elif kind == "agent.error":
-        trace("agent.error", short(p.get("errorMessage") or p))
-    elif kind == "agent.assistant":
-        text = assistant_text(event).strip()
-        if text:
-            trace("assistant", "")
-            print("\n" + text + "\n", flush=True)
-    elif kind == "run.finished":
-        trace("run.finished", f"outcome={run_outcome(event)}")
+class MarginGuardRun:
+    """One request to the agent: event trace, plan, approvals and final report.
 
+    Used by the terminal (echo=True, terminal_approver) and by api/server.py.
+    status: idle -> running <-> awaiting_approval -> succeeded | failed
+    """
 
-async def run_turn(client: ZooworkClient, agent_id: str, message: str) -> None:
-    session = await client.create_session(
-        agent_id, {"initial_events": [{"type": "user.message", "content": message}]}
-    )
-    session_id = session["session_id"]
-    trace("session.created", session_id)
-    trace("user.message", message)
+    def __init__(self, approver: Approver, echo: bool = False) -> None:
+        self.approver = approver
+        self.echo = echo
+        self.status = "idle"
+        self.error: str | None = None
+        self.session_id: str | None = None
+        self.events: list[dict[str, Any]] = []
+        self.plan: dict[str, Any] = {"comparables": {}}
+        self.apply_result: dict[str, Any] | None = None
+        self.report_parts: list[str] = []
+        self._start = time.monotonic()
 
-    # Reviewer decisions per tool call, keyed by toolCallId.
-    decisions_by_call: dict[str, dict[tuple[str, float], bool]] = {}
+    @property
+    def report(self) -> str:
+        return "\n\n".join(self.report_parts)
 
-    async for event in client.stream_events(agent_id, session_id):
-        trace_event(event)
+    def trace(self, label: str, detail: str = "") -> None:
+        elapsed = round(time.monotonic() - self._start, 1)
+        self.events.append({"seq": len(self.events), "t": elapsed, "label": label, "detail": detail})
+        if self.echo:
+            print(f"[{elapsed:6.1f}s] {label:<22} {detail}".rstrip(), flush=True)
+
+    async def review(self, raw_changes: list[dict[str, Any]]) -> dict[str, bool]:
+        self.status = "awaiting_approval"
+        try:
+            return await self.approver(describe_changes(raw_changes))
+        finally:
+            self.status = "running"
+
+    # -- tools --
+
+    async def execute_tool(
+        self, name: str | None, raw_args: Any, approved: dict[str, bool] | None
+    ) -> dict[str, Any]:
+        try:
+            args = parse_args(raw_args)
+            if name == "load_cost_sheet":
+                return {"rows": load_cost_sheet()}
+            if name == "calc_margins":
+                result = calc_margins(args)
+                key = "scenario" if args.get("prices") else "baseline"
+                self.plan[key] = {"input": args, "totals": result["totals"], "skus": result["skus"]}
+                return result
+            if name == "get_comparables":
+                result = get_comparables(args)
+                if "error" not in result:
+                    self.plan["comparables"][result["category"]] = {
+                        k: result[k] for k in ("n", "low", "median", "high", "data_source")
+                    }
+                return result
+            if name == "evaluate_pricing_rules":
+                result = evaluate_pricing_rules(args)
+                self.plan["decisions"] = result["decisions"]
+                self.plan["reprice_prices"] = result["reprice_prices"]
+                return result
+            if name == "get_store_prices":
+                return read_prices()
+            if name == "apply_price_changes":
+                changes = parse_changes(args)
+                if approved is None:
+                    # No approval event seen for this call: review before writing anyway.
+                    approved = await self.review(changes)
+                result = apply_price_changes(changes, approved, args.get("scenario"))
+                for row in result["applied"]:
+                    self.trace("price.written", f"{row['sku']}: {fmt(row['old_price'])} -> {fmt(row['new_price'])}")
+                for row in result["rejected"]:
+                    self.trace("price.skipped", f"{row['sku']} -> {fmt(row['new_price'])} ({row['status']})")
+                self.apply_result = result
+                return result
+            return {"error": f"unknown tool {name}"}
+        except Exception as exc:  # report tool failures back to the model
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
+    # -- events --
+
+    def trace_event(self, event: SessionEvent) -> None:
         p = event.payload
+        kind = event.event_type
+        if kind == "run.started":
+            self.trace("run.started", event.run_id or "")
+        elif kind == "agent.tool":
+            tc = tool_call(event)
+            if tc is None:
+                return
+            if tc.phase == "start":
+                self.trace("tool.start", f"{tc.tool_name} {short(tc.args or {})}")
+            elif tc.phase == "end":
+                self.trace("tool.end", f"{tc.tool_name}{' (error)' if tc.is_error else ''}")
+            else:
+                self.trace("tool.blocked", f"{tc.tool_name} reason={p.get('deniedReason')}")
+        elif kind == "agent.custom_tool_use":
+            call = custom_tool_use(event)
+            if call is None:
+                return
+            if call.phase == "requested":
+                self.trace("custom_tool.requested", f"{call.name} {short(call.input or {})}")
+            else:
+                self.trace("custom_tool.resolved", f"{call.name or call.call_id} outcome={call.outcome}")
+        elif kind == "agent.approval":
+            if p.get("phase") == "requested":
+                self.trace("approval.requested", f"{p.get('toolName')} approval={p.get('approvalId')}")
+            else:
+                self.trace("approval.resolved", f"{p.get('toolName') or ''} resolution={p.get('resolution')}")
+        elif kind == "agent.error":
+            self.trace("agent.error", short(p.get("errorMessage") or p))
+        elif kind == "agent.assistant":
+            text = assistant_text(event).strip()
+            if text:
+                self.report_parts.append(text)
+                self.trace("assistant", short(text, 80))
+                if self.echo:
+                    print("\n" + text + "\n", flush=True)
+        elif kind == "run.finished":
+            self.trace("run.finished", f"outcome={run_outcome(event)}")
 
-        if event.event_type == "agent.approval" and p.get("phase") == "requested":
-            if p.get("toolName") != "apply_price_changes":
-                # Nothing else is configured to ask; deny anything unexpected.
+    async def _turn(self, client: ZooworkClient, agent_id: str, message: str) -> None:
+        session = await client.create_session(
+            agent_id, {"initial_events": [{"type": "user.message", "content": message}]}
+        )
+        self.session_id = session["session_id"]
+        self.trace("session.created", self.session_id)
+        self.trace("user.message", message)
+
+        # Reviewer decisions per tool call, keyed by toolCallId.
+        decisions_by_call: dict[str, dict[str, bool]] = {}
+
+        async for event in client.stream_events(agent_id, self.session_id):
+            self.trace_event(event)
+            p = event.payload
+
+            if event.event_type == "agent.approval" and p.get("phase") == "requested":
+                if p.get("toolName") != "apply_price_changes":
+                    # Nothing else is configured to ask; deny anything unexpected.
+                    await client.resolve_approval(
+                        agent_id, p["approvalId"], decision="deny", resolved_by="marginguard"
+                    )
+                    continue
+                decisions = await self.review(parse_changes(p.get("arguments")))
+                decisions_by_call[p.get("toolCallId") or ""] = decisions
+                decision = "allow-once" if any(decisions.values()) else "deny"
                 await client.resolve_approval(
-                    agent_id, p["approvalId"], decision="deny", resolved_by="marginguard"
+                    agent_id, p["approvalId"], decision=decision, resolved_by="marginguard-reviewer"
                 )
-                continue
-            decisions = await review_changes(parse_changes(p.get("arguments")))
-            decisions_by_call[p.get("toolCallId") or ""] = decisions
-            decision = "allow-once" if any(decisions.values()) else "deny"
-            await client.resolve_approval(
-                agent_id, p["approvalId"], decision=decision, resolved_by="terminal-operator"
-            )
 
-        call = custom_tool_use(event)
-        if call is not None and call.phase == "requested":
-            approved = decisions_by_call.get(call.tool_call_id or "")
-            result = await execute_tool(call.name, call.input or {}, approved)
-            trace("local.result", f"{call.name}: {summarize_result(call.name or '', result)}")
-            await client.resolve_custom_tool_call(
-                agent_id,
-                call.call_id,
-                content=[{"type": "json", "value": result}],
-                is_error="error" in result,
-                resolved_by="marginguard",
-            )
+            call = custom_tool_use(event)
+            if call is not None and call.phase == "requested":
+                approved = decisions_by_call.get(call.tool_call_id or "")
+                result = await self.execute_tool(call.name, call.input or {}, approved)
+                self.trace("local.result", f"{call.name}: {summarize_result(call.name or '', result)}")
+                await client.resolve_custom_tool_call(
+                    agent_id,
+                    call.call_id,
+                    content=[{"type": "json", "value": result}],
+                    is_error="error" in result,
+                    resolved_by="marginguard",
+                )
 
-        if is_run_finished(event):
-            outcome = run_outcome(event)
-            if outcome != "succeeded":
-                raise RuntimeError(f"Run ended with outcome: {outcome}")
-            break
+            if is_run_finished(event):
+                outcome = run_outcome(event)
+                if outcome != "succeeded":
+                    raise RuntimeError(f"Run ended with outcome: {outcome}")
+                break
 
+    async def run(self, message: str, reset: bool = False) -> None:
+        self.status = "running"
+        try:
+            if reset:
+                reset_prices()
+                self.trace("prices.reset", f"{ORIGINAL_PRICES_FILE.name} -> {PRICES_FILE.name}")
+            async with create_zoowork_client() as client:
+                agent_id, action = await get_or_create_agent(client)
+                if action != "existing":
+                    self.trace(f"agent.{action}", agent_id)
+                await client.start_agent(agent_id)
+                await client.wait_until_running(agent_id, timeout=120)
+                await self._turn(client, agent_id, message)
+            self.status = "succeeded"
+        except Exception as exc:
+            self.status = "failed"
+            self.error = f"{type(exc).__name__}: {exc}"
+            self.trace("run.failed", self.error)
+            raise
+
+
+# ---------- terminal mode ----------
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Run the MarginGuard pricing agent.")
@@ -516,16 +598,8 @@ async def main() -> None:
     parser.add_argument("message", nargs="*", help="request for the agent")
     opts = parser.parse_args()
 
-    if opts.reset:
-        shutil.copyfile(ORIGINAL_PRICES_FILE, PRICES_FILE)
-        trace("prices.reset", f"{ORIGINAL_PRICES_FILE.name} -> {PRICES_FILE.name}")
-
     message = " ".join(opts.message).strip() or input("Message for the agent: ").strip()
-    async with create_zoowork_client() as client:
-        agent_id = await get_or_create_agent(client)
-        await client.start_agent(agent_id)
-        await client.wait_until_running(agent_id, timeout=120)
-        await run_turn(client, agent_id, message)
+    await MarginGuardRun(terminal_approver, echo=True).run(message, reset=opts.reset)
 
 
 if __name__ == "__main__":
