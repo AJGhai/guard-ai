@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "dashboard"))
 load_dotenv(ROOT / ".env")
 
+import quotes_section  # noqa: E402
 import style  # noqa: E402
 from agent.photo_spec import prepare_image  # noqa: E402
 from agent.sourcing import run_sourcing  # noqa: E402
@@ -47,7 +48,7 @@ LETTERS = "ABCDE"
 SAMPLE_DESCRIPTION = "Lightweight linen wide-leg pants for women, high elastic waist, beige, full length"
 RFQ_QTY, RFQ_DEADLINE = 500, 60   # the Supplier RFQ page's defaults, so it shows the same quotes
 
-st.set_page_config(page_title="Improve My Product", page_icon=":mag:", layout="wide")
+st.set_page_config(page_title="Guard AI", page_icon=":shield:", layout="wide", initial_sidebar_state="collapsed")
 style.inject()
 st.markdown(
     """<style>
@@ -126,7 +127,7 @@ style.hero(
     "changes are worth making.",
     hint="Start with step 1 below. Nothing is bought or sent without your approval.",
 )
-style.flow_bar(1)
+style.flow_bar(3 if st.session_state.get("po_saved") else 2 if st.session_state.get("quotes_open") else 1)
 style.glossary()
 
 # ---------- 1. your product ----------
@@ -200,6 +201,8 @@ if instant_clicked:
         if saved.get(k) is not None:
             st.session_state[k] = saved[k]
     st.session_state.pop("po_saved", None)
+    if saved.get("rfq_result") is not None:
+        st.session_state["quotes_open"] = True   # the recorded run already has quotes: show them below
     recorded_price = (recorded.get("listing") or {}).get("price")
     if recorded_price and abs(recorded_price - price) > 0.005:
         st.session_state["pending_price"] = float(recorded_price)
@@ -265,6 +268,7 @@ if analyze_clicked or autopilot_clicked:
                     "result": rfq,
                 }
                 st.session_state.pop("po_saved", None)
+                st.session_state["quotes_open"] = True   # Autopilot's quotes show in step 2 below
             status.update(label="Done. " + ("Purchase order waiting for your approval below."
                                              if autopilot_clicked else "Scroll down."), state="complete")
             st.session_state["improve"] = state
@@ -517,28 +521,6 @@ with bb2:
 st.caption("A tech-pack mockup: changed areas are marked and labelled on your photo (approximate), "
            "not a re-rendered photo.")
 
-# ---------- continue: from the chosen changes straight to supplier quotes ----------
-
-if selected:
-    st.markdown("---")
-    cc1, cc2 = st.columns([2, 3], vertical_alignment="center")
-    with cc1:
-        go_quotes = st.button(f"➡️ Continue: ask suppliers for quotes ({len(selected)} change{'s' if len(selected) != 1 else ''})",
-                              type="primary", key="continue_rfq", width="stretch")
-    with cc2:
-        st.caption("Your chosen changes carry over. Three simulated suppliers are messaged and quote them; "
-                   "then you compare landed cost and approve an order. Nothing is really sent.")
-    if go_quotes:
-        st.session_state["rfq_context"] = {
-            "keyword": spec["title"],
-            "changes": [{k: s[k] for k in ("title", "fixes", "unit_cost_delta", "price_delta", "supplier_ask")}
-                        for s in selected],
-            "inputs": asdict(after_event),
-            "price_add": price_add,
-        }
-        st.session_state["rfq_autostart"] = True   # the quotes page starts asking suppliers right away
-        st.switch_page("pages/2_Supplier_RFQ.py")
-
 # ---------- 7. where to source it ----------
 
 st.markdown("### 7. Where to source it")
@@ -581,39 +563,33 @@ else:
                            mime="text/html", width="stretch")
         st.caption("Open it and print to PDF. Nothing is sent.")
     with c2:
-        style.next_link("pages/2_Supplier_RFQ.py", "Next: get supplier quotes (your changes carry over)", "📦")
+        st.caption("Send this to suppliers with your request, or keep it for your records.")
     with st.expander("Preview the spec sheet"):
         components.html(sheet, height=620, scrolling=True)
 
-# ---------- 9. autopilot: quotes and purchase order (stops for approval) ----------
+# ---------- step 2: supplier quotes, on this same page ----------
 
-if auto:
-    st.markdown("### 9. Autopilot: quotes and purchase order")
-    rfq = auto["rfq"]
-    st.markdown(badge(rfq.get("mode") != "scripted", "ZOOWORK AGENTS", "SCRIPTED REPLIES")
-                + ' <span class="badge badge-sample">SIMULATED VENDORS</span>', unsafe_allow_html=True)
-    if rfq.get("note"):
-        st.warning(rfq["note"])
-    st.dataframe(pd.DataFrame([{
-        "Vendor": r["name"], "Country": r["country"], "Factory $": r["unit_price"], "Landed $": round(r["landed"], 2),
-        "Profit / unit $": round(r["profit"], 2), "Margin": f"{r['margin']:.1%}", "MOQ": r["moq"],
-        "Lead days": r["lead_time_days"], "Meets all": "✅" if r["eligible"] else "❌",
-    } for r in auto["rows"]]), hide_index=True, width="stretch")
-    st.caption("Full chats on the **Supplier quotes** page.")
-    po = auto.get("po")
-    if po and auto.get("approved") is None:
-        st.markdown("#### ✋ Purchase order waiting for your approval")
-        st.code(po_text(po), language=None)
-        a1, a2, _ = st.columns([1, 1, 3])
-        if a1.button("Approve purchase order", type="primary", width="stretch"):
-            auto["path"], auto["approved"] = write_po(po), True
-            st.rerun()
-        if a2.button("Reject", width="stretch"):
-            auto["approved"] = False
-            st.rerun()
-    elif auto.get("approved"):
-        st.success(f"Approved and saved to `{auto['path']}`. Nothing was sent to the vendor.")
-    elif auto.get("approved") is False:
-        st.info("Purchase order rejected. Nothing was saved or sent.")
-    else:
-        st.info("No vendor could make this order. Adjust the changes on Supplier quotes.")
+st.markdown("---")
+if not selected:
+    st.caption("Tick at least one change above to continue to supplier quotes.")
+else:
+    cc1, cc2 = st.columns([2, 3], vertical_alignment="center")
+    with cc1:
+        go_quotes = st.button(f"➡️ Continue: ask suppliers for quotes ({len(selected)} change{'s' if len(selected) != 1 else ''})",
+                              type="primary", key="continue_rfq", width="stretch")
+    with cc2:
+        st.caption("Your chosen changes carry over. Three simulated suppliers are messaged and quote them; "
+                   "then you compare landed cost and approve an order. Nothing is really sent.")
+    if go_quotes:
+        st.session_state["rfq_context"] = {
+            "keyword": spec["title"],
+            "changes": [{k: s[k] for k in ("title", "fixes", "unit_cost_delta", "price_delta", "supplier_ask")}
+                        for s in selected],
+            "inputs": asdict(after_event),
+            "price_add": price_add,
+        }
+        st.session_state["quotes_open"] = True
+        st.session_state["rfq_autostart"] = True   # start asking suppliers right away
+        st.session_state["rfq_scroll"] = True      # and scroll down to them
+    if st.session_state.get("quotes_open"):
+        quotes_section.render()

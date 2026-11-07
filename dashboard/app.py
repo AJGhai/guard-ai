@@ -1,24 +1,18 @@
-"""Guard AI dashboard: the navigation menu. Run it from the repo root:
+"""Guard AI: one page, one flow. Run it from the repo root:
 
     .venv/bin/streamlit run dashboard/app.py
 
-This file only builds the sidebar menu. Each page is its own file. The demo is one flow:
-Start here, Improve my product, then Supplier quotes. Older pages live in dashboard/archive
-(see its README) and are not in the menu.
+Paste an Amazon listing (or pick an example), see what real buyers say, tick the changes worth
+making, then continue to supplier quotes and approve an order, all on this page. The menu is hidden;
+the cost assumptions are in the collapsed side panel. Older pages (Start, Supplier quotes as a
+page, Plan a new product, Tariff protection) live in dashboard/archive and are not in the app.
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-pages = {
-    "Start": [
-        st.Page("home.py", title="Start here", icon="🏠", default=True),
-    ],
-    "Build a better product": [
-        st.Page("pages/0_Improve_My_Product.py", title="Improve my product", icon="🔍", url_path="improve"),
-        st.Page("pages/2_Supplier_RFQ.py", title="Supplier quotes", icon="📦", url_path="quotes"),
-    ],
-}
-
-st.navigation(pages).run()
+st.navigation(
+    [st.Page("pages/0_Improve_My_Product.py", title="Guard AI", icon="🛡️", default=True)],
+    position="hidden",
+).run()
