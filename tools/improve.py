@@ -14,11 +14,14 @@ labelled sample on its own, so one failing call never stops the run.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 import httpx
 
+from agent.advisor import advise_evidence
 from agent.photo_spec import analyze_photo, compare_with_competitors, prepare_image
+from tools.reviews import build_evidence, gather_reviews
 from tools.listing import (
     SAMPLE_COMPETITOR_THEMES,
     asin_from_text,
@@ -70,6 +73,52 @@ def _competitors(market: dict[str, Any], themes: dict[str, Any] | None) -> dict[
     }
 
 
+MIN_LOW_STAR_FOR_EVIDENCE = 5
+
+
+def evidence_competitors(listing: dict[str, Any] | None, market: dict[str, Any]) -> list[dict[str, Any]]:
+    """Up to three listings to read reviews for: the seller's own (if known), then top sellers."""
+    out: list[dict[str, Any]] = []
+    skip: set[str] = set()
+    if listing and listing.get("asin"):
+        out.append({"asin": listing["asin"], "name": f"Your listing ({listing['asin']})", "role": "your listing"})
+        skip |= {listing["asin"], listing.get("parent_asin") or ""}
+    for item in sorted(market.get("listings") or [], key=lambda r: -(r.get("monthly_sales_floor") or 0)):
+        if not item.get("asin") or item["asin"] in skip or item.get("parent_asin") in skip:
+            continue
+        out.append({"asin": item["asin"], "name": item.get("brand") or (item.get("title") or "")[:28], "role": "competitor"})
+        if len(out) >= 3:
+            break
+    return out
+
+
+def themes_from_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
+    """Competitor review themes in the shape the comparison agent expects, from the evidence."""
+    high = max(evidence["n_high"], 1)
+
+    def top(kinds: tuple[str, ...]) -> list[dict[str, Any]]:
+        return [{"element": t["name"], "rate": round(t["share"], 3)} for t in evidence["themes"] if t["kind"] in kinds][:6]
+
+    return {
+        "source": "live_zoodata",
+        "asins": [s["asin"] for s in evidence["sources"]],
+        "review_count": evidence["n_low"] + evidence["n_high"],
+        "avg_rating": None,
+        "issues": top(("issue", "pain point")),
+        "positives": [{"element": p["name"], "rate": round(p["count"] / high, 3)} for p in evidence["positives"][:6]],
+        "improvements": top(("improvement",)),
+        "basis": "most helpful reviews; issue rates are the share of low-star reviews",
+    }
+
+
+def grounded_to_spec(grounded: dict[str, Any]) -> list[dict[str, Any]]:
+    """Advisor changes in the page's improvement shape, keeping the evidence fields."""
+    return [
+        {**item, "fixes": item.get("observation") or item["title"]}
+        for item in grounded["improvements"]
+    ]
+
+
 def run_pipeline(
     mode: str,
     *,
@@ -118,16 +167,44 @@ def run_pipeline(
 
     exclude = (state["listing"] or {}).get("asin")
     asins = competitor_asins(market.get("listings") or [], exclude)
-    step(f"Reading competitors' reviews ({len(asins)} top sellers)" if asins else "Competitors' reviews: none available")
-    comp = review_themes(asins, SAMPLE_COMPETITOR_THEMES) if asins else None
-    if comp is None and market.get("source") != "live_zoodata":
-        comp = {**SAMPLE_COMPETITOR_THEMES, "note": "Sample themes (no live market data)"}
-    state["competitor_reviews"] = comp
-
-    step("The agent is comparing you with competitors")
     you = _you(state["listing"], state["own_reviews"], price)
     state["you"] = you
-    state["comparison"] = compare_with_competitors(you, _competitors(market, comp), market)
+
+    # Real buyer words first: the most helpful reviews of you and the top sellers, counted in code
+    # (about 3 seconds). They also supply the competitor themes, so ZooData's slow aggregate
+    # endpoint (about 2 minutes) is only a fallback.
+    state["evidence"] = state["grounded"] = None
+    evidence = None
+    comps = evidence_competitors(state["listing"], market)
+    if market.get("source") == "live_zoodata" and comps:
+        step(f"Reading the most helpful buyer reviews ({len(comps)} listings)")
+        try:
+            found = build_evidence(comps, gather_reviews([c["asin"] for c in comps]))
+            if found["n_low"] >= MIN_LOW_STAR_FOR_EVIDENCE:
+                evidence = found
+        except Exception as exc:  # the rest of the analysis still stands
+            state["evidence_error"] = f"{type(exc).__name__}: {exc}"[:200]
+
+    if evidence:
+        comp = themes_from_evidence(evidence)
+    else:
+        step(f"Reading competitors' reviews ({len(asins)} top sellers)" if asins else "Competitors' reviews: none available")
+        comp = review_themes(asins, SAMPLE_COMPETITOR_THEMES) if asins else None
+        if comp is None and market.get("source") != "live_zoodata":
+            comp = {**SAMPLE_COMPETITOR_THEMES, "note": "Sample themes (no live market data)"}
+    state["competitor_reviews"] = comp
+
+    step("The agent is comparing you with competitors" + (" and citing the reviews" if evidence else ""))
+    economics = {"price": you.get("price"), "note": "seller costs are applied on the page"}
+    with ThreadPoolExecutor(max_workers=2) as pool:  # the two agent calls are independent
+        compare_future = pool.submit(compare_with_competitors, you, _competitors(market, comp), market)
+        advise_future = pool.submit(advise_evidence, terms, evidence, economics, market) if evidence else None
+        state["comparison"] = compare_future.result()
+        if advise_future is not None:
+            grounded = advise_future.result()
+            state["evidence"], state["grounded"] = evidence, grounded
+            if grounded["source"] == "zoowork_agent":
+                state["spec"]["improvements"] = grounded_to_spec(grounded)
     step("Analysis done")
     return state
 

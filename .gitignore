@@ -40,3 +40,4 @@ market/cache/reviews/
 market/cache/listings/
 agent/.photo_agent_id
 agent/.photo_config_hash
+market/cache/demo_run.json

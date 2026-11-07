@@ -80,3 +80,26 @@ class Evidence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PipelineGlue(unittest.TestCase):
+    def test_evidence_competitors_puts_own_listing_first_and_skips_duplicates(self):
+        from tools.improve import evidence_competitors
+        market = {"listings": [
+            {"asin": "B0AAAAAAA1", "parent_asin": "P1", "brand": "A", "monthly_sales_floor": 100},
+            {"asin": "B0AAAAAAA2", "parent_asin": "P2", "brand": "B", "monthly_sales_floor": 300},
+            {"asin": "B0AAAAAAA3", "parent_asin": "P1", "brand": "A2", "monthly_sales_floor": 50},
+            {"asin": "B0AAAAAAA4", "parent_asin": "P4", "brand": "D", "monthly_sales_floor": 10},
+        ]}
+        got = evidence_competitors({"asin": "B0AAAAAAA1", "parent_asin": "P1"}, market)
+        self.assertEqual(got[0]["role"], "your listing")
+        asins = [c["asin"] for c in got]
+        self.assertEqual(len(asins), 3)
+        self.assertNotIn("B0AAAAAAA3", asins)  # same parent as the seller's own listing
+        self.assertEqual(asins[1], "B0AAAAAAA2")  # best seller first
+
+    def test_grounded_to_spec_keeps_evidence_and_fills_fixes(self):
+        from tools.improve import grounded_to_spec
+        out = grounded_to_spec({"improvements": [{"title": "Add lining", "observation": "Thin fabric", "support": {"count": 3}}]})
+        self.assertEqual(out[0]["fixes"], "Thin fabric")
+        self.assertEqual(out[0]["support"]["count"], 3)
