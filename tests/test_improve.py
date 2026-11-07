@@ -146,6 +146,24 @@ class AnnotateTests(unittest.TestCase):
         self.assertTrue(annotate(sample_photo(), [], "#00a374").startswith(b"\xff\xd8"))
 
 
+class SketchTests(unittest.TestCase):
+    def test_clean_svg_strips_active_content(self):
+        from agent.sketch import clean_svg
+        raw = ('ok <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 700">'
+               '<path d="M1 1" onclick="x()"/><script>x()</script><a href="http://x"><g/></a>'
+               '<image href="http://x/i.png"/><circle r="16" style="fill:url(http://e)"/></svg> bye')
+        out = clean_svg(raw)
+        for bad in ("script", "onclick", "http://x", "http://e", "<image", "<a "):
+            self.assertNotIn(bad, out)
+        self.assertIn("<circle", out)
+
+    def test_clean_svg_rejects_garbage(self):
+        from agent.sketch import clean_svg
+        for bad in ("no svg here", "<svg><g></svg>"):
+            with self.assertRaises(ValueError):
+                clean_svg(bad)
+
+
 class PipelineTests(unittest.TestCase):
     def setUp(self):
         self.saved = {k: getattr(imp, k) for k in

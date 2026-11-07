@@ -37,3 +37,5 @@ agent/.rfq_agent_id
 agent/.rfq_config_hash
 agent/.photo_agent_id
 agent/.photo_config_hash
+agent/.sketch_agent_id
+agent/.sketch_config_hash

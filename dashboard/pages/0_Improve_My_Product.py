@@ -11,6 +11,7 @@ a purchase order, then stops for your approval. All margin math is tools/unit_ec
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import html
 import os
@@ -32,6 +33,7 @@ load_dotenv(ROOT / ".env")
 
 import style  # noqa: E402
 from agent.photo_spec import prepare_image  # noqa: E402
+from agent.sketch import draw_improved  # noqa: E402
 from agent.sourcing import run_sourcing  # noqa: E402
 from tools.annotate import annotate  # noqa: E402
 from tools.improve import auto_select, run_pipeline  # noqa: E402
@@ -193,6 +195,10 @@ if analyze_clicked or autopilot_clicked:
                 picked = auto_select(spec["improvements"])
                 chosen = [{**spec["improvements"][i - 1], "n": i} for i in picked]
                 st.write(f"⏳ Picking improvements: {', '.join(c['title'] for c in chosen)}")
+                status.update(label="Drawing the improved product")
+                st.write("⏳ Drawing the improved product (AI sketch)")
+                st.session_state["sketch"] = {"key": (basis, tuple(c["title"] for c in chosen)),
+                                              **draw_improved(spec, chosen)}
                 listing_price = (state.get("listing") or {}).get("price")
                 base = apply_event(replace(inputs, price=listing_price or price), event_key)
                 changes = [{k: c[k] for k in ("title", "fixes", "unit_cost_delta", "price_delta", "supplier_ask")}
@@ -423,8 +429,30 @@ with bb1:
     st.image(annotate(jpeg, weak, "#e5484d", list(LETTERS[: len(weak)]), "Before: weak points", "why"))
 with bb2:
     st.image(after_img)
-st.caption("A tech-pack mockup: changed areas are marked and labelled on your photo (approximate), "
-           "not a re-rendered photo.")
+st.caption("Tech pack: changed areas marked and labelled on your photo (approximate).")
+
+st.markdown("#### See the improved product")
+sk_key = (basis, tuple(s["title"] for s in selected))
+if st.button("🎨 Draw the improved product", disabled=not selected,
+             help="A ZooWork agent draws a fashion flat sketch with the selected changes drawn in."):
+    with st.spinner("The agent is drawing the improved product (about 20 to 40 seconds)..."):
+        st.session_state["sketch"] = {"key": sk_key, **draw_improved(spec, selected)}
+sketch = st.session_state.get("sketch")
+sketch_svg = sketch.get("svg") if sketch and sketch.get("key") == sk_key else None
+if sketch and sketch.get("key") == sk_key and not sketch_svg:
+    st.warning(sketch.get("note") or "The sketch could not be drawn.")
+if sketch_svg:
+    s1, s2 = st.columns(2, gap="large")
+    with s1:
+        st.image(jpeg, caption="Before: your product")
+    with s2:
+        b64 = base64.b64encode(sketch_svg.encode()).decode()
+        st.markdown(f'<img src="data:image/svg+xml;base64,{b64}" style="width:100%;background:#fff;'
+                    f'border-radius:8px"/>', unsafe_allow_html=True)
+        st.caption("After: AI-drawn flat sketch with the changes drawn in, highlighted in green. "
+                   "An illustration, not a photo.")
+elif sketch is None or sketch.get("key") != sk_key:
+    st.caption("Press the button to have the agent draw your product with these changes.")
 
 # ---------- 7. where to source it ----------
 
@@ -461,7 +489,7 @@ else:
             "inputs": asdict(after_event),
             "price_add": price_add,
         }
-    sheet = build_spec_sheet(jpeg, spec, selected, improved, annotated=after_img)
+    sheet = build_spec_sheet(jpeg, spec, selected, improved, annotated=after_img, sketch_svg=sketch_svg)
     c1, c2 = st.columns([1, 2])
     with c1:
         st.download_button("Download spec sheet", sheet.encode(), file_name=f"spec-sheet-{basis}.html",

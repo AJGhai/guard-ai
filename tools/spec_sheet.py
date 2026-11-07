@@ -60,6 +60,7 @@ def build_spec_sheet(
     economics: dict[str, Any] | None = None,
     buyer: str = "Guard Apparel",
     annotated: bytes | None = None,
+    sketch_svg: str | None = None,
 ) -> str:
     e = html.escape
     rows = "".join(
@@ -77,6 +78,11 @@ def build_spec_sheet(
         photo = f'<img src="{data_uri(annotated)}" style="width:100%;border-radius:8px;display:block"/>'
     else:
         photo = pinned_photo_html(data_uri(jpeg), selected, "#00d395", [str(i) for i in range(1, len(selected) + 1)])
+    sketch_html = ""
+    if sketch_svg:
+        b64 = base64.b64encode(sketch_svg.encode()).decode()
+        sketch_html = (f'<h2>Improved product (sketch)</h2><img src="data:image/svg+xml;base64,{b64}" '
+                       'style="width:100%;border:1px solid #ddd;border-radius:8px"/>')
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>Spec sheet: {e(spec['title'])}</title>
 <style>
  body {{ font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#111; margin:32px; }}
@@ -92,7 +98,7 @@ def build_spec_sheet(
 <div class="m">Product spec and change request from {e(buyer)} · {date.today():%d %b %Y}
  · <span class="tag">DRAFT FOR SUPPLIER QUOTES</span></div>
 <div class="grid" style="margin-top:16px">
- <div style="flex:0 0 {520 if annotated else 360}px">{photo}<div class="m" style="margin-top:6px">Numbers mark where each change applies (approximate).</div></div>
+ <div style="flex:0 0 {520 if annotated else 360}px">{photo}<div class="m" style="margin-top:6px">Numbers mark where each change applies (approximate).</div>{sketch_html}</div>
  <div style="flex:1">
   <h2>Product</h2><ul>
    <li><b>Type:</b> {e(spec['product_type'])}</li>

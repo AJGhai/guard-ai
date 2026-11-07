@@ -63,11 +63,15 @@ def annotate(
 
     # Each item's marked area and the y of its badge; callouts follow the same top-to-bottom order.
     marks = []
+    per_region: dict[str, int] = {}
     for item, label in zip(items, labels):
         region = item.get("region") if item.get("region") in REGION_BANDS else "whole"
         top, bottom = REGION_BANDS[region]
         box = (inset, int(top * ph), pw - inset, int(bottom * ph))
         badge_y = box[1] + 30 if region == "whole" else (box[1] + box[3]) // 2
+        k = per_region.get(region, 0)          # several marks in one region: step them apart
+        per_region[region] = k + 1
+        badge_y += 46 * k
         marks.append({"item": item, "label": label, "region": region, "box": box, "y": badge_y})
     marks.sort(key=lambda m: m["y"])
 
@@ -86,7 +90,7 @@ def annotate(
     for m in marks:
         item = m["item"]
         lines = textwrap.wrap(str(item.get("title", "")), 30)[:2]
-        detail = textwrap.wrap(str(item.get(detail_key, "")), 38)[:2]
+        detail = textwrap.wrap(str(item.get(detail_key, "")), 40)[:3]
         ch = 34 + 24 * len(lines) + 20 * len(detail)
         cy = max(next_top, min(m["y"] - ch // 2, ph - ch - 30))
         next_top = cy + ch + 14
