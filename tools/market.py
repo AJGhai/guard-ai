@@ -108,6 +108,10 @@ def market_picture(keyword: str) -> dict[str, Any]:
                 "rating": r.get("rating"),
                 "rating_count": r.get("ratingCount"),
                 "monthly_sales_floor": r.get("parentMonthlySalesFloor") or r.get("monthlySalesFloor"),
+                # for the competitor thumbnail strip (Photo to Product page)
+                "image": r.get("imageUrl"),
+                "bsr": r.get("bsr"),
+                "asin": r.get("parentAsin") or r.get("asin"),
             }
             for r in rows
         ],
