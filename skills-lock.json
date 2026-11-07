@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "amazon-competitor-intelligence-monitor": {
+      "source": "SerendipityOneInc/ZooData-Skills",
+      "sourceType": "github",
+      "skillPath": "amazon-competitor-intelligence-monitor/SKILL.md",
+      "computedHash": "6a8f2991742fe586e12741ef492e29719a672d7218730e66b9304ea9078da54c"
+    },
+    "amazon-market-analysis": {
+      "source": "SerendipityOneInc/ZooData-Skills",
+      "sourceType": "github",
+      "skillPath": "amazon-market-analysis/SKILL.md",
+      "computedHash": "8adf2e05d73c5d1abb360e648eea11c9fb75293c9039ca697d3ac89d4d2d21a9"
+    },
+    "amazon-pricing-command-center": {
+      "source": "SerendipityOneInc/ZooData-Skills",
+      "sourceType": "github",
+      "skillPath": "amazon-pricing-command-center/SKILL.md",
+      "computedHash": "ade82efe973c6040b3d0aa047bb97d8c0897dd5587ee6a44298c128e23f168db"
+    },
+    "zoodata": {
+      "source": "SerendipityOneInc/ZooData-Skills",
+      "sourceType": "github",
+      "skillPath": "zoodata/SKILL.md",
+      "computedHash": "0fc0b14d888fabb5d541a7683a3aa3af6d6a5c0bddb9344d51df74bf432c2bd2"
+    },
+    "zoowork-managed-agents": {
+      "source": "SerendipityOneInc/zoowork-sdk-skills",
+      "sourceType": "github",
+      "skillPath": "skills/zoowork-managed-agents/SKILL.md",
+      "computedHash": "adc774cd4faa55de6b166851f93542c3f4d6562ca985adf333136445fc2adbee"
+    }
+  }
+}
