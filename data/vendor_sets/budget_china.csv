@@ -1,0 +1,4 @@
+name,country,contact,unit_price,moq,lead_time_days,certifications,payment_terms,duty_rate,notes
+Guangzhou Bulk Garments,China,+86 20 0000 0000,7.60,1500,50,,50% deposit; 50% before shipping,37,Terse. Pushes for big orders. Vague about certifications until asked.
+Ningbo Value Textiles,China,export@ningbo-value.example.com,8.10,1000,48,BSCI,40% deposit; 60% before shipping,37,Responsive but rigid on minimum order quantities.
+Foshan Fast Fashion Factory,China,hello@foshan-fast.example.com,7.95,1200,42,,30% deposit; 70% before shipping,37,Cheapest and quickest with little quality documentation.

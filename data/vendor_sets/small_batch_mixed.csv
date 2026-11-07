@@ -1,0 +1,5 @@
+name,country,contact,unit_price,moq,lead_time_days,certifications,payment_terms,duty_rate,notes
+Hanoi Sample Lab,Vietnam,lab@hanoi-sample.example.com,11.20,100,30,OEKO-TEX,50% deposit; 50% before shipping,12,Great for test batches. Higher price.
+Jaipur Handloom Studio,India,hello@jaipur-handloom.example.com,10.20,150,52,GOTS,40% deposit; 60% before shipping,12,Handmade feel. Can do small custom runs.
+Cebu Garment Partners,Philippines,sales@cebu-garments.example.com,10.90,200,44,,30% deposit; 70% before shipping,12,Friendly and English-speaking. Steady quality.
+Colombo Stitchworks,Sri Lanka,orders@colombo-stitch.example.com,11.00,250,40,"WRAP, OEKO-TEX",30% deposit; 70% before shipping,12,Ethical-production focus. Tidy documentation.

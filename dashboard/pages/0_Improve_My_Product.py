@@ -32,6 +32,7 @@ load_dotenv(ROOT / ".env")
 
 import quotes_section  # noqa: E402
 import style  # noqa: E402
+from tools.vendors import SAMPLE_SETS, TEMPLATE_CSV, load_sample_set, parse_vendor_sheet  # noqa: E402
 from agent.photo_spec import prepare_image  # noqa: E402
 from agent.sourcing import run_sourcing  # noqa: E402
 from tools.annotate import annotate  # noqa: E402
@@ -114,10 +115,10 @@ after_event = apply_event(inputs, event_key)
 # ---------- header ----------
 
 style.hero(
-    "Improve My Product",
-    "Paste your Amazon listing and we show where you beat competitors, where you fall behind, and which "
-    "changes are worth making.",
-    hint="Start with step 1 below. Nothing is bought or sent without your approval.",
+    "Guard AI",
+    "Paste your Amazon listing. We show where you stand, what real buyers say and what to change, then get "
+    "supplier quotes for those changes and prepare the order and the message to the supplier.",
+    hint="You approve every money step. Nothing is ever sent to a supplier or changed on Amazon.",
 )
 style.flow_bar(3 if st.session_state.get("po_saved") else 2 if st.session_state.get("quotes_open") else 1)
 st.caption(
@@ -164,6 +165,40 @@ elif mode == "photo":
         photo_bytes = sample_jpeg()
 else:
     description = st.text_area("Describe the product", SAMPLE_DESCRIPTION, height=80)
+
+# ---------- your vendors (optional): upload a sheet or pick a sample set ----------
+
+st.markdown("**Your vendors (optional)**")
+vc1, vc2 = st.columns(2)
+with vc1:
+    vendor_file = st.file_uploader("Upload your vendor sheet (CSV or Excel)", type=["csv", "xlsx"], key="vendor_file")
+with vc2:
+    sample_pick = st.selectbox("Or use a sample vendor set (fictional vendors)", ["None"] + list(SAMPLE_SETS),
+                               key="vendor_set_pick")
+    st.download_button("Download the sheet template", TEMPLATE_CSV.encode(), file_name="vendor-template.csv",
+                       mime="text/csv", key="vendor_template")
+_vendors: list[Any] = []
+_source = ""
+_warns: list[str] = []
+try:
+    if vendor_file is not None:
+        _vendors, _warns = parse_vendor_sheet(vendor_file.getvalue(), vendor_file.name, supplier_cost)
+        _source = f"your file {vendor_file.name}"
+    elif sample_pick != "None":
+        _vendors, _warns = load_sample_set(sample_pick, supplier_cost)
+        _source = f"sample set “{sample_pick}”"
+except Exception as exc:
+    st.error(f"Could not read that vendor sheet: {exc}")
+if _vendors:
+    st.session_state["vendors_mine"], st.session_state["vendors_source"] = _vendors, _source
+    st.caption(f"✅ {len(_vendors)} vendors loaded from {_source}: " + ", ".join(v.name for v in _vendors) +
+               ". They are messaged automatically. Extra suggested vendors need your sign-off in step 2.")
+    for w in _warns:
+        st.caption("⚠️ " + w)
+else:
+    st.session_state.pop("vendors_mine", None)
+    st.caption("No vendor sheet loaded: three sample vendors are used. Columns: name, country, contact, unit_price, "
+               "moq, lead_time_days, certifications, payment_terms, duty_rate, notes.")
 
 with st.expander("Extra buyer complaints (optional)"):
     complaints_text = st.text_area(
@@ -241,13 +276,14 @@ if analyze_clicked or autopilot_clicked:
                 price_add = sum(c["price_delta"] for c in chosen)
                 product = spec["title"]
                 use_agents = bool(os.environ.get("ZOOWORK_API_KEY", "").strip())
-                status.update(label="Requesting quotes from three suppliers")
-                st.write("⏳ Requesting quotes from three suppliers (simulated vendors)")
+                vendors_now = quotes_section.active_vendors()   # your vendors (auto), or the sample three
+                status.update(label=f"Requesting quotes from {len(vendors_now)} suppliers")
+                st.write(f"⏳ Requesting quotes from {len(vendors_now)} suppliers (simulated replies)")
                 ref = reference_cost(base.supplier_cost, changes)
                 rfq = run_sourcing(product, changes, ref, RFQ_QTY, RFQ_DEADLINE, use_agents,
-                                   lambda s: st.write("   · " + s))
+                                   lambda s: st.write("   · " + s), vendors_now)
                 rows = evaluate(rfq["quotes"], base, price_add, RFQ_QTY, RFQ_DEADLINE,
-                                {v.key: v.duty_rate for v in VENDORS})
+                                {v.key: v.duty_rate for v in vendors_now}, vendors=vendors_now)
                 best = next((r for r in rows if r["eligible"]), rows[0] if rows else None)
                 st.write("⏳ Ranking quotes on landed cost and drafting the purchase order")
                 state["autopilot"] = {
@@ -260,7 +296,8 @@ if analyze_clicked or autopilot_clicked:
                 st.session_state["rfq_context"] = {"keyword": product, "changes": changes,
                                                    "inputs": asdict(base), "price_add": price_add}
                 st.session_state["rfq_result"] = {
-                    "key": (product, tuple(c["title"] for c in changes), RFQ_QTY, RFQ_DEADLINE, use_agents),
+                    "key": (product, tuple(c["title"] for c in changes), RFQ_QTY, RFQ_DEADLINE, use_agents)
+                           + ((tuple(v.key for v in vendors_now),) if st.session_state.get("vendors_mine") else ()),
                     "result": rfq,
                 }
                 st.session_state.pop("po_saved", None)
@@ -314,14 +351,16 @@ if jpeg is None:
     jpeg, stand_in = sample_jpeg(), stand_in or "sample illustration"
 src = data_uri(jpeg)
 
-# ---------- 2. your listing and what your buyers say ----------
+# ---------- 2. where you stand: your product, the market, and you vs competitors ----------
 
-st.markdown("### 2. Your listing and what your buyers say")
-if listing:
-    c1, c2 = st.columns([1, 3], gap="large")
-    with c1:
-        st.image(jpeg, width=180)
-    with c2:
+st.markdown("### 2. Where you stand")
+c1, c2 = st.columns([1, 3], gap="large")
+with c1:
+    st.image(jpeg, width=180)
+    if not listing:
+        st.caption(f"Showing the {stand_in} as a stand-in." if stand_in else "Your photo.")
+with c2:
+    if listing:
         st.markdown(f"{badge(listing.get('source') == 'live_zoodata', 'LIVE ZOODATA', 'SAMPLE LISTING')} "
                     f"**{html.escape(listing.get('title') or '')}**", unsafe_allow_html=True)
         st.markdown(
@@ -329,25 +368,18 @@ if listing:
             f"({format(listing.get('rating_count') or 0, ',')} ratings)"
             + (f" · best seller rank #{listing['bsr']:,}" if listing.get("bsr") else "")
         )
-        if listing.get("features"):
-            st.markdown("<span class='subtle'>" + " · ".join(html.escape(f[:70]) for f in listing["features"][:4])
-                        + "</span>", unsafe_allow_html=True)
-if own:
-    st.markdown(f"**Your buyers complain about** {chips(own.get('issues'), 'bad')}", unsafe_allow_html=True)
-    st.markdown(f"**Your buyers like** {chips(own.get('positives'), 'good')}", unsafe_allow_html=True)
-    if own.get("raw_low_star"):
-        with st.expander(f"Latest low-star reviews ({len(own['raw_low_star'])})"):
-            for r in own["raw_low_star"]:
-                st.markdown(f"★{r.get('rating')} **{html.escape(r['title'])}**: {html.escape(r['body'][:240])}")
-    st.caption(f"From {format(own.get('review_count') or 0, ',')} reviews"
-               + (" (sample)" if own.get("source") == "sample" else " via ZooData") + ". % = share of reviews.")
-elif not listing:
-    st.caption("Paste your listing link to read your own reviews. With a photo or description, the agent works "
-               "from what it sees.")
+    st.markdown(f"{badge(spec.get('source') == 'zoowork_agent', 'ZOOWORK AGENT', 'SAMPLE SPEC')} "
+                f"**How the agent reads your product:** {html.escape(spec['product_type'])}", unsafe_allow_html=True)
+    if spec.get("materials"):
+        st.markdown("**Materials:** " + ", ".join(spec["materials"]))
+    if spec.get("features"):
+        st.markdown("**Features:** " + " · ".join(spec["features"]))
+    if spec.get("summary"):
+        st.markdown(f"<span class='subtle'>{html.escape(spec['summary'])}</span>", unsafe_allow_html=True)
 
-# ---------- 3. the market ----------
+# ---------- 2 (continued): the market ----------
 
-st.markdown("### 3. The market")
+st.markdown("#### The market")
 p = market["price"]
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Median price", money(p["median"]), f"{money(p['p25'])} to {money(p['p75'])} middle half", delta_color="off")
@@ -370,9 +402,9 @@ if with_images:
 else:
     st.caption("Competitor thumbnails appear with live ZooData (add ZOODATA_API_KEY to .env).")
 
-# ---------- 4. you vs competitors ----------
+# ---------- 2 (continued): you vs competitors ----------
 
-st.markdown("### 4. You vs competitors")
+st.markdown("#### You vs competitors")
 you = state["you"]
 counts = sorted(r.get("rating_count") or 0 for r in listings)
 top = listings[0] if listings else {}
@@ -404,66 +436,54 @@ with r_:
                     f"<span>→ {html.escape(item.get('action', ''))}</span></div>", unsafe_allow_html=True)
     if not cmp_.get("room_to_improve"):
         st.caption("Nothing stands out yet.")
+weak = spec.get("weak_points") or []   # shown on the "before" image in section 4
+
+# ---------- 3. what buyers say: all the review material, in one place ----------
+
+st.markdown("### 3. What buyers say")
+evidence: dict[str, Any] | None = state.get("evidence")
+if own:
+    st.markdown(f"**Your buyers complain about** {chips(own.get('issues'), 'bad')}", unsafe_allow_html=True)
+    st.markdown(f"**Your buyers like** {chips(own.get('positives'), 'good')}", unsafe_allow_html=True)
+    st.caption(f"From {format(own.get('review_count') or 0, ',')} reviews"
+               + (" (sample)" if own.get("source") == "sample" else " via ZooData") + ". % = share of reviews.")
+elif not listing:
+    st.caption("Paste your listing link to read your own reviews. With a photo or description, the agent works "
+               "from what it sees.")
 if comp_rev:
     st.markdown(f"**Competitors' buyers praise** {chips(comp_rev.get('positives'), 'good')}", unsafe_allow_html=True)
     st.markdown(f"**Competitors' buyers complain about** {chips(comp_rev.get('issues'), 'bad')}", unsafe_allow_html=True)
-st.markdown(
-    badge(cmp_.get("source") == "zoowork_agent", "ZOOWORK AGENT", "FROM THE NUMBERS")
-    + (" " + badge(comp_rev.get("source") == "live_zoodata", "COMPETITOR REVIEWS: ZOODATA", "COMPETITOR REVIEWS: SAMPLE")
-       if comp_rev else ""),
-    unsafe_allow_html=True,
-)
-
-# ---------- 5. what the agent sees ----------
-
-st.markdown("### 5. What the agent sees")
-weak = spec.get("weak_points") or []
-left, right = st.columns([2, 3], gap="large")
-with left:
-    st.markdown(pinned_photo_html(src, weak, RED, list(LETTERS[: len(weak)])), unsafe_allow_html=True)
-    st.caption((f"Showing the {stand_in} as a stand-in. " if stand_in else "") + "Pins mark approximate areas.")
-with right:
-    st.markdown(f"{badge(spec.get('source') == 'zoowork_agent', 'ZOOWORK AGENT', 'SAMPLE SPEC')} "
-                f"&nbsp;**{html.escape(spec['title'])}**", unsafe_allow_html=True)
-    st.markdown(f"<span class='subtle'>{html.escape(spec['product_type'])}</span>", unsafe_allow_html=True)
-    if spec.get("materials"):
-        st.markdown("**Materials:** " + ", ".join(spec["materials"]))
-    if spec.get("features"):
-        st.markdown("**Features:** " + " · ".join(spec["features"]))
-    st.markdown("**Weak points**")
-    for letter, w in zip(LETTERS, weak):
-        st.markdown(f'<div class="wp"><span class="letter">{letter}</span><b>{html.escape(w["title"])}</b> '
-                    f'<span class="subtle">{html.escape(w["why"])}</span></div>', unsafe_allow_html=True)
-    if spec.get("summary"):
-        st.markdown(f"<span class='subtle'>{html.escape(spec['summary'])}</span>", unsafe_allow_html=True)
-
-# ---------- 6. improve it ----------
-
-st.markdown("### 6. Improve it")
-evidence: dict[str, Any] | None = state.get("evidence")
+    st.markdown(badge(comp_rev.get("source") == "live_zoodata", "COMPETITOR REVIEWS: ZOODATA",
+                      "COMPETITOR REVIEWS: SAMPLE"), unsafe_allow_html=True)
 if evidence:
     st.markdown(
-        f"**Backed by real reviews.** Read {evidence['n_low']} low-star (1 to 3) and {evidence['n_high']} high-star "
-        f"reviews, the most helpful first, across: {', '.join(s['name'] for s in evidence['sources'])}."
+        f"**The reviews behind our recommendations.** We read {evidence['n_low']} low-star (1 to 3) and "
+        f"{evidence['n_high']} high-star reviews, the most helpful first, across: "
+        f"{', '.join(s['name'] for s in evidence['sources'])}."
     )
-    ev1, ev2 = st.columns([3, 2], gap="large")
-    with ev1:
-        st.dataframe(
-            pd.DataFrame(
-                [{"Theme": t["name"], "Type": t["kind"], "Reviews": t["count"], "Share of low-star": t["share"],
-                  "Avg rating": t["avg_rating"]} for t in evidence["themes"][:8]]
-            ).style.format({"Share of low-star": "{:.0%}", "Avg rating": "{:.1f}"}),
-            width="stretch", hide_index=True, height=318,
-        )
-    with ev2:
-        st.markdown("**What buyers like (keep this)**")
-        st.markdown("<span class='subtle'>" + html.escape(", ".join(p["name"] for p in evidence["positives"][:6]) or "n/a")
-                    + "</span>", unsafe_allow_html=True)
-        st.caption("Themes are ZooData's AI tags on each review. Counts are reviews mentioning the theme, computed in code. "
-                   "The agent can only cite themes and reviews that exist here.")
+    st.dataframe(
+        pd.DataFrame(
+            [{"Theme": t["name"], "Type": t["kind"], "Reviews": t["count"], "Share of low-star": t["share"],
+              "Avg rating": t["avg_rating"]} for t in evidence["themes"][:8]]
+        ).style.format({"Share of low-star": "{:.0%}", "Avg rating": "{:.1f}"}),
+        width="stretch", hide_index=True, height=318,
+    )
+    if not own:
+        st.markdown("**What buyers like (keep this):** " + html.escape(
+            ", ".join(pos["name"] for pos in evidence["positives"][:6]) or "n/a"))
+    st.caption("Themes are ZooData's AI tags on each review. Counts are reviews mentioning the theme, computed in code. "
+               "The agent can only cite themes and reviews that exist here.")
     grounded_note = (state.get("grounded") or {}).get("note")
     if grounded_note:
         st.warning(grounded_note)
+if own and own.get("raw_low_star"):
+    with st.expander(f"Latest low-star reviews of your listing ({len(own['raw_low_star'])})"):
+        for r in own["raw_low_star"]:
+            st.markdown(f"★{r.get('rating')} **{html.escape(r['title'])}**: {html.escape(r['body'][:240])}")
+
+# ---------- 4. what to change: the decision, its effect on profit, and before / after ----------
+
+st.markdown("### 4. What to change")
 st.caption("Cost and price effects are the agent's estimates. Tick the changes to price in."
            + (" Autopilot picked the ticked ones." if auto else ""))
 auto_picked = set((auto or {}).get("picked") or [])
@@ -517,9 +537,10 @@ with bb2:
 st.caption("A tech-pack mockup: changed areas are marked and labelled on your photo (approximate), "
            "not a re-rendered photo.")
 
-# ---------- 7. where to source it ----------
+# ---------- 5. brief your suppliers: where to source, and the spec sheet ----------
 
-st.markdown("### 7. Where to source it")
+st.markdown("### 5. Brief your suppliers")
+st.markdown("#### Where to source")
 sourcing = spec.get("sourcing") or []
 if sourcing:
     cols = st.columns(len(sourcing))
@@ -537,9 +558,9 @@ if sourcing:
     st.caption("Regions, not specific factories: we have no supplier database, so verify any supplier yourself. "
                "Check the current US duty for each country, since it changes the landed cost.")
 
-# ---------- 8. spec sheet + hand-off ----------
+# ---------- 5 (continued): spec sheet + hand-off ----------
 
-st.markdown("### 8. Spec sheet for suppliers")
+st.markdown("#### Spec sheet")
 if not selected:
     st.caption("Tick at least one change to build the spec sheet.")
 else:

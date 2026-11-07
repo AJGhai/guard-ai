@@ -37,6 +37,8 @@ class Vendor:
     personality: str
     cannot: tuple[str, ...] = ()  # keywords of changes this vendor cannot make
     cannot_text: str = ""  # the same restriction in plain English, for the vendor's prompt
+    contact: str = ""  # email or phone from the seller's own vendor sheet
+    source: str = "sample"  # "yours" (uploaded), "suggested" (needs sign-off) or "sample"
 
 
 VENDORS: tuple[Vendor, ...] = (
@@ -150,9 +152,10 @@ def evaluate(
     qty: int,
     deadline_days: int,
     duty_by_vendor: dict[str, float],
+    vendors: "list[Vendor] | tuple[Vendor, ...] | None" = None,
 ) -> list[dict[str, Any]]:
     """One row per quote with landed cost, profit, margin and pass/fail flags, best first."""
-    by_key = {v.key: v for v in VENDORS}
+    by_key = {v.key: v for v in (vendors or VENDORS)}
     rows = []
     for q in quotes:
         vendor = by_key[q["vendor"]]
@@ -219,6 +222,40 @@ def po_text(po: dict[str, Any]) -> str:
         f"Lead time: {po['lead_time_days']} days\n"
         "Ship to: [your warehouse]\n"
     )
+
+
+MSG_DIR = OUTBOX / "messages"
+
+
+def vendor_message(po: dict[str, Any], contact: str = "", sender: str = "[Your name]") -> str:
+    """The message a person reads, edits and approves before an order goes to a supplier."""
+    changes = "\n".join(f"  - {c}" for c in po["changes"]) or "  - as quoted"
+    to = f"To: {po['vendor']}" + (f" <{contact}>" if contact else "")
+    return (
+        f"{to}\n"
+        f"Subject: Purchase order {po['po_number']}: {po['product']}\n\n"
+        f"Hello {po['vendor']} team,\n\n"
+        "Thank you for your quote. We would like to place this order:\n\n"
+        f"  Product: {po['product']}\n"
+        f"  Changes:\n{changes}\n"
+        f"  Quantity: {po['quantity']:,} units\n"
+        f"  Unit price: ${po['unit_price']:.2f} {po['incoterm']}\n"
+        f"  Total: ${po['total']:,.2f}\n"
+        f"  Payment terms: {po['payment_terms']}\n"
+        f"  Lead time: {po['lead_time_days']} days\n\n"
+        "Please confirm the price, the lead time and that you can make every change. Please also send a "
+        "pro forma invoice and the timeline for a pre-production sample.\n\n"
+        f"Thank you,\n{sender}\n"
+    )
+
+
+def write_message(po: dict[str, Any], text: str) -> str:
+    """Save an approved supplier message to data/outbox/messages/. Nothing is sent."""
+    MSG_DIR.mkdir(parents=True, exist_ok=True)
+    path = MSG_DIR / f"{po['po_number']}.md"
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    path.write_text(f"Approved: {stamp} (outbox only, not sent)\n\n{text}", encoding="utf-8")
+    return str(path.relative_to(MSG_DIR.parent.parent.parent)).replace("\\", "/")
 
 
 def write_po(po: dict[str, Any]) -> str:

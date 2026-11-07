@@ -1,0 +1,4 @@
+name,country,contact,unit_price,moq,lead_time_days,certifications,payment_terms,duty_rate,notes
+Sunrise Apparel Co,Vietnam,sales@sunrise-apparel.example.com,9.40,500,38,OEKO-TEX,30% deposit; 70% before shipping,12,Reliable and polite. Will trade a little price for volume.
+Lotus Textile Works,India,+91 98000 00000,8.90,800,45,GOTS,50% deposit; 50% before shipping,12,Cheaper but slower to reply.
+Saigon Stitch Studio,Vietnam,orders@saigon-stitch.example.com,9.90,300,33,"OEKO-TEX, WRAP",30% deposit; 70% before shipping,12,Small minimums and fast but firm on price.

@@ -135,8 +135,9 @@ def _vendor_prompt(
     )
 
 
-def _counter_prompt(replies: dict[str, str], qty: int, target: float) -> str:
-    blocks = "\n".join(f'[{v.key}] {v.name}: "{replies[v.key]}"' for v in VENDORS)
+def _counter_prompt(replies: dict[str, str], qty: int, target: float, vendors: list[Vendor]) -> str:
+    blocks = "\n".join(f'[{v.key}] {v.name}: "{replies[v.key]}"' for v in vendors)
+    shape = "{" + ", ".join(f'"{v.key}": "..."' for v in vendors) + "}"
     return (
         "You are the sourcing assistant of an Amazon seller. Write ONE short WhatsApp message to each "
         f"vendor to negotiate the unit price down toward ${target:.2f} per unit for {qty} units. "
@@ -144,22 +145,22 @@ def _counter_prompt(replies: dict[str, str], qty: int, target: float) -> str:
         "competing quote is lower only if it really is lower than that vendor's price (never name the "
         "competitor or give its number). Under 40 words each. Do not accept any price yet.\n"
         f"VENDOR REPLIES:\n{blocks}\n"
-        'Reply with ONLY JSON: {"hoabinh": "...", "dongguan": "...", "dhaka": "..."}'
+        f"Reply with ONLY JSON: {shape}"
     )
 
 
-def _extract_prompt(chats: dict[str, list[dict[str, str]]], changes: list[dict[str, Any]]) -> str:
+def _extract_prompt(chats: dict[str, list[dict[str, str]]], changes: list[dict[str, Any]], vendors: list[Vendor]) -> str:
     titles = [c["title"] for c in changes]
     blocks = "\n\n".join(
         f"[{v.key}] {v.name}\n"
         + "\n".join(f"{'Buyer' if m['role'] == 'buyer' else 'Vendor'}: {m['text']}" for m in chats[v.key])
-        for v in VENDORS
+        for v in vendors
     )
     return (
         "Extract supplier quotes for an Amazon seller from the chats below. Use only what the vendor "
         f"actually wrote. Requested changes: {titles}.\n"
         "Reply with ONLY JSON in this shape:\n"
-        '{"quotes":[{"vendor":"hoabinh","unit_price":0.0,"moq":0,"lead_time_days":0,'
+        f'{{"quotes":[{{"vendor":"{vendors[0].key}","unit_price":0.0,"moq":0,"lead_time_days":0,'
         '"certifications":[],"payment_terms":"","can_make_all_changes":true,'
         '"declined_changes":[],"notes":""}],'
         '"summary":"2 or 3 sentences: which vendor looks best and the main trade-off"}\n'
@@ -175,10 +176,10 @@ def _numbers(text: str) -> list[float]:
     return [float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*\.?\d*", text)]
 
 
-def _validate(raw: dict[str, Any], chats: dict[str, list[dict[str, str]]]) -> list[dict[str, Any]]:
+def _validate(raw: dict[str, Any], chats: dict[str, list[dict[str, str]]], vendors: list[Vendor]) -> list[dict[str, Any]]:
     quotes = []
     by_key = {q.get("vendor"): q for q in raw.get("quotes", [])}
-    for v in VENDORS:
+    for v in vendors:
         q = by_key.get(v.key)
         if not q:
             raise ValueError(f"no quote extracted for {v.key}")
@@ -206,10 +207,10 @@ def _validate(raw: dict[str, Any], chats: dict[str, list[dict[str, str]]]) -> li
 
 async def _run(
     product: str, changes: list[dict[str, Any]], ref: float, qty: int, deadline_days: int,
-    on_stage: Callable[[str], None],
+    on_stage: Callable[[str], None], vendors: list[Vendor],
 ) -> dict[str, Any]:
     rfq = build_rfq(product, changes, qty, deadline_days)
-    chats: dict[str, list[dict[str, str]]] = {v.key: [{"role": "buyer", "text": rfq}] for v in VENDORS}
+    chats: dict[str, list[dict[str, str]]] = {v.key: [{"role": "buyer", "text": rfq}] for v in vendors}
 
     async with create_zoowork_client() as client:
         agent_id = await _get_or_create_agent(client)
@@ -218,42 +219,44 @@ async def _run(
 
         on_stage("Vendors are replying to your request for quote")
         first = await asyncio.gather(
-            *[_ask(client, agent_id, _vendor_prompt(v, ref, changes, qty, product, chats[v.key], 1)) for v in VENDORS]
+            *[_ask(client, agent_id, _vendor_prompt(v, ref, changes, qty, product, chats[v.key], 1)) for v in vendors]
         )
-        for v, text in zip(VENDORS, first):
+        for v, text in zip(vendors, first):
             chats[v.key].append({"role": "vendor", "text": _clean(text)})
 
         on_stage("Your sourcing agent is negotiating")
         counters = _json(
             await _ask(
                 client, agent_id,
-                _counter_prompt({v.key: chats[v.key][-1]["text"] for v in VENDORS}, qty, buyer_target(ref)),
+                _counter_prompt({v.key: chats[v.key][-1]["text"] for v in vendors}, qty, buyer_target(ref), vendors),
             )
         )
-        for v in VENDORS:
+        for v in vendors:
             chats[v.key].append({"role": "buyer", "text": _clean(str(counters[v.key]))})
 
         on_stage("Vendors are sending final prices")
         second = await asyncio.gather(
-            *[_ask(client, agent_id, _vendor_prompt(v, ref, changes, qty, product, chats[v.key], 2)) for v in VENDORS]
+            *[_ask(client, agent_id, _vendor_prompt(v, ref, changes, qty, product, chats[v.key], 2)) for v in vendors]
         )
-        for v, text in zip(VENDORS, second):
+        for v, text in zip(vendors, second):
             chats[v.key].append({"role": "vendor", "text": _clean(text)})
 
         on_stage("Comparing the quotes")
-        extracted = _json(await _ask(client, agent_id, _extract_prompt(chats, changes)))
+        extracted = _json(await _ask(client, agent_id, _extract_prompt(chats, changes, vendors)))
 
     return {
         "mode": "agents",
         "chats": chats,
-        "quotes": _validate(extracted, chats),
+        "quotes": _validate(extracted, chats, vendors),
         "summary": str(extracted.get("summary", "")).strip(),
     }
 
 
-def _scripted(product: str, changes: list[dict[str, Any]], ref: float, qty: int, deadline_days: int) -> dict[str, Any]:
+def _scripted(
+    product: str, changes: list[dict[str, Any]], ref: float, qty: int, deadline_days: int, vendors: list[Vendor]
+) -> dict[str, Any]:
     chats, quotes = {}, []
-    for v in VENDORS:
+    for v in vendors:
         ex = scripted_exchange(v, ref, changes, qty, deadline_days, product)
         chats[v.key] = ex["messages"]
         quotes.append({**ex["quote"], "verified": True})
@@ -273,15 +276,20 @@ def run_sourcing(
     deadline_days: int,
     use_agents: bool = True,
     on_stage: Callable[[str], None] = lambda _s: None,
+    vendors: list[Vendor] | None = None,
 ) -> dict[str, Any]:
-    """Blocking. Returns {"mode", "chats", "quotes", "summary", "note"?}."""
+    """Blocking. Returns {"mode", "chats", "quotes", "summary", "note"?}.
+
+    vendors: who to ask (the seller's own, plus any suggested ones they signed off on). Defaults to
+    the three built-in sample vendors."""
+    vendors = list(vendors) if vendors else list(VENDORS)
     if not use_agents:
-        return _scripted(product, changes, ref_cost, qty, deadline_days)
+        return _scripted(product, changes, ref_cost, qty, deadline_days, vendors)
     try:
         return asyncio.run(
-            asyncio.wait_for(_run(product, changes, ref_cost, qty, deadline_days, on_stage), TIMEOUT_SECONDS)
+            asyncio.wait_for(_run(product, changes, ref_cost, qty, deadline_days, on_stage, vendors), TIMEOUT_SECONDS)
         )
     except Exception as exc:  # keep the demo alive, but say so
         note = re.sub(r"\s+", " ", f"{type(exc).__name__}: {exc}")[:200]
-        return {**_scripted(product, changes, ref_cost, qty, deadline_days),
+        return {**_scripted(product, changes, ref_cost, qty, deadline_days, vendors),
                 "note": f"The agents were unavailable ({note}); showing scripted replies."}

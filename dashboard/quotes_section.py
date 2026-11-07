@@ -1,18 +1,26 @@
 """Supplier quotes, as the last section of the one-page flow (no separate page).
 
-render() takes the changes the seller ticked (st.session_state["rfq_context"]), asks three SIMULATED
-vendors for quotes in WhatsApp-style chats (ZooWork agents, or scripted replies with no credits),
-compares them on landed cost, and drafts a purchase order that a person approves. Nothing is ever
-sent: an approved PO is written to data/outbox/po/ and goes nowhere else.
+render() takes the changes the seller ticked (st.session_state["rfq_context"]), asks SIMULATED vendors
+for quotes in WhatsApp-style chats (ZooWork agents, or scripted replies with no credits), compares them
+on landed cost, and prepares the order for a person to approve, together with the message that goes to
+the supplier. Nothing is ever sent: an approved order and message are written to data/outbox/ only.
 
-Session keys: rfq_context (the changes), rfq_result (the quotes), rfq_autostart (start right away),
-rfq_scroll (scroll here), po_saved (path of the approved order).
+Who is asked:
+  - the seller's own vendors (st.session_state["vendors_mine"], from their sheet) are messaged
+    automatically;
+  - suggested additional vendors (the built-in sample vendors not already in the sheet) are only asked
+    after the seller ticks them (checkbox key "sg_<vendor key>"). That tick is the sign-off;
+  - with no sheet loaded, the three built-in sample vendors are used as before.
+
+Session keys: rfq_context, rfq_result, rfq_autostart, rfq_scroll, po_saved, rfq_po_number,
+vendors_mine, vendors_source.
 """
 
 from __future__ import annotations
 
 import html
 import os
+from dataclasses import replace
 from typing import Any
 
 import pandas as pd
@@ -21,7 +29,9 @@ import streamlit.components.v1 as components
 
 import style
 from agent.sourcing import run_sourcing
-from tools.rfq import VENDORS, build_po, evaluate, po_text, reference_cost, write_po
+from tools.rfq import (
+    VENDORS, Vendor, build_po, evaluate, po_text, reference_cost, vendor_message, write_message, write_po,
+)
 from tools.unit_economics import Inputs
 
 _CHAT_CSS = """
@@ -57,6 +67,23 @@ def _tick(ok: bool) -> str:
     return "ok" if ok else "NO"
 
 
+# ---------- who gets asked ----------
+
+def suggested_pool(mine: list[Vendor]) -> list[Vendor]:
+    """Additional vendors we could suggest: the built-in ones that are not already in the seller's sheet."""
+    names = {v.name.lower() for v in mine}
+    return [replace(v, source="suggested") for v in VENDORS if v.name.lower() not in names]
+
+
+def active_vendors() -> list[Vendor]:
+    """The seller's own vendors, plus any suggested ones they have ticked. Default: the built-in three."""
+    mine: list[Vendor] = list(st.session_state.get("vendors_mine") or [])
+    if not mine:
+        return list(VENDORS)
+    approved = [v for v in suggested_pool(mine) if st.session_state.get(f"sg_{v.key}")]
+    return mine + approved
+
+
 def render() -> None:
     ctx = st.session_state.get("rfq_context")
     st.markdown('<div id="quotes-anchor"></div>', unsafe_allow_html=True)
@@ -81,8 +108,8 @@ def render() -> None:
 
     st.markdown(
         '<span class="badge badge-sim">SIMULATED VENDORS</span> '
-        '<span class="subtle">Three vendors quote your changes. Compare the true cost per unit, then approve one '
-        "order. No real message is ever sent.</span>",
+        '<span class="subtle">Replies are simulated from vendor terms. Compare the true cost per unit, then approve '
+        "one order and its message. No real message is ever sent.</span>",
         unsafe_allow_html=True,
     )
 
@@ -105,6 +132,29 @@ def render() -> None:
             help="Off: scripted replies, no credits, instant. Use it as a backup.",
         )
 
+    # ---------- who to ask ----------
+    mine: list[Vendor] = list(st.session_state.get("vendors_mine") or [])
+    st.markdown("### Who to ask")
+    if mine:
+        st.markdown(
+            f"**Your vendors, messaged automatically** ({st.session_state.get('vendors_source', 'your sheet')}): "
+            + ", ".join(f"{v.name} ({v.country})" for v in mine)
+        )
+        pool = suggested_pool(mine)
+        with st.container(border=True):
+            st.markdown("**Suggested additional vendors.** Not in your sheet, so nobody is contacted until you "
+                        "tick them. Ticking is your sign-off.")
+            for v in pool:
+                certs = ", ".join(v.certs) or "no certifications listed"
+                st.checkbox(
+                    f"{v.name} ({v.country}): minimum {v.moq} units, {v.lead_days} days, {certs}",
+                    key=f"sg_{v.key}",
+                )
+    else:
+        st.caption("Using three sample vendors. Load a vendor sheet at the top of the page to use your own, "
+                   "and approve any extra vendors here.")
+    vendors = active_vendors()
+
     with st.expander("Demo assumptions (editable)"):
         st.caption(
             "Vendor prices and terms are simulated. Duty rates are assumptions for the demo, not current law. "
@@ -112,14 +162,17 @@ def render() -> None:
         )
         duty_df = st.data_editor(
             pd.DataFrame(
-                {"Vendor": [v.name for v in VENDORS], "Country": [v.country for v in VENDORS],
-                 "Assumed duty (%)": [v.duty_rate * 100 for v in VENDORS]}
+                {"Vendor": [v.name for v in vendors], "Country": [v.country for v in vendors],
+                 "Assumed duty (%)": [v.duty_rate * 100 for v in vendors]}
             ),
-            disabled=["Vendor", "Country"], hide_index=True, width="stretch", key="duty_editor",
+            disabled=["Vendor", "Country"], hide_index=True, width="stretch",
+            key="duty_editor_" + "_".join(v.key for v in vendors),
         )
-    duty_by_vendor = {v.key: float(duty_df.loc[i, "Assumed duty (%)"]) / 100 for i, v in enumerate(VENDORS)}
+    duty_by_vendor = {v.key: float(duty_df.loc[i, "Assumed duty (%)"]) / 100 for i, v in enumerate(vendors)}
 
-    run_key = (product, tuple(c["title"] for c in changes), qty, deadline, use_agents)
+    run_key: tuple = (product, tuple(c["title"] for c in changes), qty, deadline, use_agents)
+    if mine:  # custom vendor set: the quotes belong to exactly these vendors
+        run_key += (tuple(v.key for v in vendors),)
 
     # Arriving from "Continue" starts the quotes right away, unless this same request already has quotes
     # (for example from the recorded demo).
@@ -127,20 +180,24 @@ def render() -> None:
     have = st.session_state.get("rfq_result")
     auto_run = autostart and not (have and have["key"] == run_key)
 
-    if st.button("Request quotes from three vendors", type="primary", key="rfq_go") or auto_run:
+    n_new = len([v for v in vendors if v.source == "suggested"])
+    label = f"Request quotes from {len(vendors)} vendors" + (f" (incl. {n_new} you approved)" if n_new else "")
+    if st.button(label, type="primary", key="rfq_go") or auto_run:
         with st.status("Contacting vendors...", expanded=True) as status:
-            def on_stage(label: str) -> None:
-                status.update(label=label)
-                st.write(label)
+            def on_stage(text: str) -> None:
+                status.update(label=text)
+                st.write(text)
 
-            result = run_sourcing(product, changes, ref, int(qty), int(deadline), use_agents, on_stage)
+            result = run_sourcing(product, changes, ref, int(qty), int(deadline), use_agents, on_stage, vendors)
             status.update(label="Quotes are in", state="complete", expanded=False)
         st.session_state["rfq_result"] = {"key": run_key, "result": result}
         st.session_state.pop("po_saved", None)
+        st.session_state.pop("rfq_po_number", None)
 
     saved = st.session_state.get("rfq_result")
     if not saved or saved["key"] != run_key:
-        st.caption("Press the button to start. With the agents on, it takes about 30 seconds.")
+        st.caption("Press the button to start. Vendors you ticked above are contacted only when you press it. "
+                   "With the agents on, it takes about 30 seconds.")
         return
 
     result = saved["result"]
@@ -149,7 +206,7 @@ def render() -> None:
     if result["mode"] == "scripted":
         st.markdown(
             '<span class="badge badge-sample">SCRIPTED REPLIES</span> '
-            '<span class="subtle">Fixed vendor profiles, no agents involved.</span>',
+            '<span class="subtle">Fixed vendor terms, no agents involved.</span>',
             unsafe_allow_html=True,
         )
     else:
@@ -160,14 +217,16 @@ def render() -> None:
         )
 
     st.markdown("### The conversations")
+    first_key = next(iter(result["chats"]))
     with st.expander("Request for quote sent to every vendor"):
-        st.code(result["chats"][VENDORS[0].key][0]["text"], language=None)
-    tabs = st.tabs([f"{v.name} ({v.country})" for v in VENDORS])
-    for tab, v in zip(tabs, VENDORS):
+        st.code(result["chats"][first_key][0]["text"], language=None)
+    quoted = [v for v in vendors if v.key in result["chats"]]
+    tabs = st.tabs([f"{v.name} ({v.country})" for v in quoted])
+    for tab, v in zip(tabs, quoted):
         with tab:
             st.markdown(bubbles(result["chats"][v.key][1:], v.name), unsafe_allow_html=True)
 
-    rows = evaluate(result["quotes"], base, price_add, int(qty), int(deadline), duty_by_vendor)
+    rows = evaluate(result["quotes"], base, price_add, int(qty), int(deadline), duty_by_vendor, vendors=vendors)
     st.markdown("### Quotes compared on what you actually pay")
     table = pd.DataFrame(
         [
@@ -226,16 +285,38 @@ def render() -> None:
             unsafe_allow_html=True,
         )
 
-    st.markdown("### Approve the order")
-    st.caption("Pick the vendor, read the draft below, then approve. Approving only saves a file; nothing is sent.")
+    # ---------- approve: the order and the message to the supplier ----------
+    st.markdown("### Approve the order and the message")
+    st.caption("Pick the vendor, read the order and the message that goes with it, edit the message if you like, "
+               "then approve. Approving saves both to the outbox; nothing is sent.")
     choice = st.selectbox("Order from", [r["name"] for r in rows], index=0, key="rfq_vendor")
     row = next(r for r in rows if r["name"] == choice)
+    chosen = next((v for v in vendors if v.name == choice), None)
     if not row["eligible"]:
         st.warning(f"{row['name']} does not meet every requirement. Check the table before approving.")
+    if chosen is not None and chosen.source == "suggested":
+        st.info("This vendor is one you added from the suggestions.")
     po = build_po(row, product, changes, int(qty))
+    po["po_number"] = st.session_state.setdefault("rfq_po_number", po["po_number"])  # stable across reruns
+    st.markdown("**Purchase order**")
     st.code(po_text(po), language=None)
-
-    if st.button("Approve and save to outbox", type="primary", key="rfq_approve"):
-        st.session_state["po_saved"] = write_po(po)
-    if path := st.session_state.get("po_saved"):
-        st.success(f"Approved and saved to `{path}`. Nothing was sent to the vendor.")
+    contact = chosen.contact if chosen else ""
+    st.markdown("**Message to the supplier**" + (f" (to {html.escape(contact)})" if contact else ""))
+    message = st.text_area(
+        "Message", value=vendor_message(po, contact), height=330, label_visibility="collapsed",
+        key=f"rfq_msg_{po['po_number']}_{row['vendor']}_{int(qty)}_{row['unit_price']}",
+    )
+    a1, a2 = st.columns([2, 1])
+    with a1:
+        if st.button("Approve order and message the supplier (saved to outbox)", type="primary", key="rfq_approve"):
+            st.session_state["po_saved"] = {"po": write_po(po), "message": write_message(po, message)}
+    with a2:
+        st.download_button("Download the message", message.encode("utf-8"), file_name=f"{po['po_number']}-message.txt",
+                           width="stretch")
+    saved_paths = st.session_state.get("po_saved")
+    if saved_paths:
+        if isinstance(saved_paths, dict):
+            st.success(f"Approved. Order saved to `{saved_paths['po']}` and message saved to `{saved_paths['message']}`. "
+                       "Nothing was sent to the vendor.")
+        else:  # older sessions stored just the PO path
+            st.success(f"Approved and saved to `{saved_paths}`. Nothing was sent to the vendor.")
