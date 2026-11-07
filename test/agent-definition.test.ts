@@ -5,10 +5,10 @@ import { parseAgentDefinition } from "../lib/zoowork/agent-definition";
 
 const def = (frontmatter: string, body = "Be helpful.") => `---\n${frontmatter}\n---\n\n${body}\n`;
 
-// agent/agent.md is meant to be edited, so this checks its structure only,
+// agent_starter/agent.md is meant to be edited, so this checks its structure only,
 // never the example's name, tools or wording.
-test("agent/agent.md parses into a complete Agent definition", () => {
-  const { resource } = parseAgentDefinition(readFileSync("agent/agent.md", "utf8"));
+test("agent_starter/agent.md parses into a complete Agent definition", () => {
+  const { resource } = parseAgentDefinition(readFileSync("agent_starter/agent.md", "utf8"));
   assert.ok(resource.name.trim(), "name is set");
   assert.equal(resource.persona?.docs.length, 1);
   assert.equal(resource.persona?.docs[0]?.name, "AGENTS.md");

@@ -1,0 +1,524 @@
+"""MarginGuard: tariff-aware pricing agent on ZooWork Managed Agents.
+
+Custom tools (all executed locally by this script):
+  - load_cost_sheet       no approval   rows of data/sample_merchant_data.csv
+  - calc_margins          no approval   tools/calc_margins.py
+  - get_comparables       no approval   tools/comparables.py (market/fallback_prices.json for now)
+  - evaluate_pricing_rules no approval  tools/pricing_rules.py (REVIEW / REPRICE / ABSORB per SKU)
+  - get_store_prices      no approval   data/store_prices.json
+  - apply_price_changes   approval      asks y/n per change; writes only approved changes
+
+Current prices live in data/store_prices.json (single source of truth).
+
+Usage:
+  .venv/bin/python agent/run.py "Duty goes from 12% to 37% on all products. What should we do?"
+  .venv/bin/python agent/run.py --reset "..."   # restore data/store_prices.original.json first
+  .venv/bin/python agent/run.py                 # prompts for the message
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import hashlib
+import json
+import shutil
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from dotenv import load_dotenv  # noqa: E402
+from zoowork import (  # noqa: E402
+    SessionEvent,
+    ZooworkClient,
+    assistant_text,
+    create_zoowork_client,
+    custom_tool_use,
+    is_run_finished,
+    run_outcome,
+    tool_call,
+)
+
+from tools.calc_margins import calc_margins, load_cost_sheet  # noqa: E402
+from tools.comparables import get_comparables  # noqa: E402
+from tools.pricing_rules import evaluate_pricing_rules  # noqa: E402
+
+PRICES_FILE = ROOT / "data" / "store_prices.json"
+ORIGINAL_PRICES_FILE = ROOT / "data" / "store_prices.original.json"
+AGENT_ID_FILE = Path(__file__).resolve().parent / ".agent_id"
+CONFIG_HASH_FILE = Path(__file__).resolve().parent / ".agent_config_hash"
+
+load_dotenv(ROOT / ".env")
+
+INSTRUCTIONS = """\
+# MarginGuard
+
+You are MarginGuard, a pricing analyst for a fashion brand facing a tariff change.
+Current prices come from the store (`get_store_prices`); the cost sheet already uses them.
+
+## Decision rules
+Apply these per SKU, in this order, using the tariff-scenario margin from `calc_margins`
+(`margin_new` at current prices):
+a) REVIEW if tariff margin < 56%. Do not reprice it; flag it for sourcing review.
+b) Otherwise REPRICE if the current price is below the comparable median.
+   New price = min(median, round(current_price * 1.10)) in whole dollars.
+   Only reprice if the increase is at least $2; otherwise ABSORB.
+c) Otherwise ABSORB.
+
+## Workflow
+1. Call `load_cost_sheet` for every SKU's category, unit cost, current price and monthly units.
+2. Call `calc_margins` with `prices: {}` and `volume_drop: 0` for baseline (`margin_old`) and
+   tariff-scenario (`margin_new`) margins and total `exposure`. Duty rates are decimals (12% = 0.12).
+3. Call `get_comparables` once per category. Queries: Pants -> "women linen pants",
+   Dresses -> "cotton midi dress", Jackets -> "women denim jacket".
+4. Call `evaluate_pricing_rules` with the duty rates and `medians` keyed by cost-sheet category
+   (Pants, Dresses, Jackets). It applies the decision rules above exactly; use its actions and
+   new prices as given.
+5. Recalculate the plan with `calc_margins`, passing `reprice_prices` from step 4 and
+   `volume_drop: 0.02`.
+6. If there are REPRICE items, call `apply_price_changes` once with all of them, passing
+   `scenario` with the same duty rates and volume_drop 0.02. Each `reason` must cite the
+   competitor median for that category.
+7. After the result returns, write a short report:
+   - A per-SKU decision table: SKU, action, old price, new price, reason. For REPRICE items
+     rejected by the reviewer, show the action as REJECTED and the new price as the old price.
+   - Sections: Applied, Rejected, Absorbed, Review (sourcing review), Exposure,
+     Estimated recovery, Assumptions.
+   - Estimated recovery is `applied_totals.recovery` from the `apply_price_changes` result,
+     which covers only the approved changes.
+
+## Rules
+- Never do arithmetic yourself. Every margin, price, exposure, recovery or total you report must
+  come from a tool result.
+- Do not retry a rejected price change.
+- Amounts from `calc_margins` are per month.
+"""
+
+NO_ARGS = {"type": "object", "properties": {}}
+
+CUSTOM_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "load_cost_sheet",
+        "description": (
+            "Return the merchant cost sheet: one row per SKU with sku, name, category, origin, "
+            "unit_cost, price (current store price) and units_per_month."
+        ),
+        "input_schema": NO_ARGS,
+    },
+    {
+        "name": "calc_margins",
+        "description": (
+            "Calculate landed costs, margins and repricing impact. Input: duty_old and duty_new "
+            "as decimals, prices as {sku: proposed_price} (omitted SKUs keep their current "
+            "price; pass {} for the baseline), volume_drop as a decimal unit loss on repriced "
+            "SKUs. Returns per-SKU landed_old, landed_new, margin_old, margin_new, impact, and "
+            "totals exposure, recovery, blended_margin (all per month)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "duty_old": {"type": "number"},
+                "duty_new": {"type": "number"},
+                "prices": {"type": "object", "additionalProperties": {"type": "number"}},
+                "volume_drop": {"type": "number"},
+            },
+            "required": ["duty_old", "duty_new", "prices", "volume_drop"],
+        },
+    },
+    {
+        "name": "get_comparables",
+        "description": (
+            "Return competitor listings for a product category: category, n, low, high, "
+            "median, and listings with title, price, change_90d (fraction) and rating."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"category_query": {"type": "string"}},
+            "required": ["category_query"],
+        },
+    },
+    {
+        "name": "evaluate_pricing_rules",
+        "description": (
+            "Apply the MarginGuard decision rules (REVIEW / REPRICE / ABSORB) to every SKU at "
+            "current store prices. Input: duty_old and duty_new as decimals, medians as "
+            "{cost-sheet category: comparable median}. Returns decisions (sku, action, "
+            "current_price, new_price, median, tariff_margin, reason) and reprice_prices "
+            "{sku: new_price} for the REPRICE items."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "duty_old": {"type": "number"},
+                "duty_new": {"type": "number"},
+                "medians": {"type": "object", "additionalProperties": {"type": "number"}},
+            },
+            "required": ["duty_old", "duty_new", "medians"],
+        },
+    },
+    {
+        "name": "get_store_prices",
+        "description": "Return the live store prices as a JSON object mapping SKU to price.",
+        "input_schema": NO_ARGS,
+    },
+    {
+        "name": "apply_price_changes",
+        "description": (
+            "Request price changes for one or more SKUs. A human reviews each change; only "
+            "approved changes are written to the store. The result lists applied and rejected "
+            "changes and, when scenario is given, applied_totals (calc_margins totals for the "
+            "approved changes only). Do not retry rejected changes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "changes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "sku": {"type": "string"},
+                            "new_price": {"type": "number"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["sku", "new_price", "reason"],
+                    },
+                },
+                "scenario": {
+                    "type": "object",
+                    "properties": {
+                        "duty_old": {"type": "number"},
+                        "duty_new": {"type": "number"},
+                        "volume_drop": {"type": "number"},
+                    },
+                    "required": ["duty_old", "duty_new", "volume_drop"],
+                },
+            },
+            "required": ["changes"],
+        },
+    },
+]
+
+AGENT_CONFIG: dict[str, Any] = {
+    "custom_tools": CUSTOM_TOOLS,
+    "tool_policy": {
+        "permissions": {
+            "load_cost_sheet": "always_allow",
+            "calc_margins": "always_allow",
+            "get_comparables": "always_allow",
+            "evaluate_pricing_rules": "always_allow",
+            "get_store_prices": "always_allow",
+            "apply_price_changes": "always_ask",
+        }
+    },
+    "persona": {"docs": [{"name": "AGENTS.md", "content": INSTRUCTIONS}]},
+}
+
+
+# ---------- output helpers ----------
+
+def fmt(price: Any) -> str:
+    return f"{price:g}" if isinstance(price, (int, float)) else str(price)
+
+
+def short(value: Any, limit: int = 140) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, separators=(",", ":"))
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+START = time.monotonic()
+
+
+def trace(label: str, detail: str = "") -> None:
+    elapsed = time.monotonic() - START
+    print(f"[{elapsed:6.1f}s] {label:<22} {detail}".rstrip(), flush=True)
+
+
+# ---------- local data ----------
+
+def read_prices() -> dict[str, float]:
+    return json.loads(PRICES_FILE.read_text())
+
+
+def write_prices(prices: dict[str, float]) -> None:
+    PRICES_FILE.write_text(json.dumps(prices, indent=2) + "\n")
+
+
+def parse_changes(raw: Any) -> list[dict[str, Any]]:
+    """Normalize tool arguments (dict or JSON string) into a list of changes."""
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    changes = (raw or {}).get("changes") or []
+    return [c for c in changes if isinstance(c, dict)]
+
+
+def change_key(change: dict[str, Any]) -> tuple[str, float]:
+    return (str(change.get("sku")), float(change.get("new_price")))
+
+
+async def ask_yes_no(prompt: str) -> bool:
+    while True:
+        answer = (await asyncio.to_thread(input, prompt)).strip().lower()
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("  Please answer y or n.")
+
+
+async def review_changes(changes: list[dict[str, Any]]) -> dict[tuple[str, float], bool]:
+    """Ask the operator y/n for each change. Returns {(sku, new_price): approved}."""
+    prices = read_prices()
+    decisions: dict[tuple[str, float], bool] = {}
+    print("\n=== Approval required: apply_price_changes ===")
+    for change in changes:
+        sku, new_price = change_key(change)
+        old = prices.get(sku, "unknown SKU")
+        print(f"  {sku}: {fmt(old)} -> {fmt(new_price)}   reason: {change.get('reason', '')}")
+        decisions[(sku, new_price)] = await ask_yes_no(
+            f"  Approve {sku} -> {fmt(new_price)}? [y/n] "
+        )
+    print()
+    return decisions
+
+
+# ---------- custom tool execution ----------
+
+def run_apply_price_changes(
+    changes: list[dict[str, Any]],
+    decisions: dict[tuple[str, float], bool],
+    scenario: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    prices = read_prices()
+    applied, rejected = [], []
+    for change in changes:
+        sku, new_price = change_key(change)
+        if not decisions.get((sku, new_price), False):
+            rejected.append({"sku": sku, "new_price": new_price, "status": "rejected by reviewer"})
+        elif sku not in prices:
+            rejected.append({"sku": sku, "new_price": new_price, "status": "unknown SKU"})
+        elif new_price <= 0:
+            rejected.append({"sku": sku, "new_price": new_price, "status": "invalid price"})
+        else:
+            old = prices[sku]
+            prices[sku] = int(new_price) if float(new_price).is_integer() else new_price
+            applied.append({"sku": sku, "old_price": old, "new_price": prices[sku]})
+    result: dict[str, Any] = {"applied": applied, "rejected": rejected}
+    if scenario:
+        # Measure recovery for the approved changes against the prices before this write.
+        totals = calc_margins(
+            {**scenario, "prices": {row["sku"]: row["new_price"] for row in applied}}
+        )["totals"]
+        result["applied_totals"] = totals
+    if applied:
+        write_prices(prices)
+    result["prices"] = prices
+    return result
+
+
+def summarize_result(name: str, result: dict[str, Any]) -> str:
+    if "error" in result:
+        return f"error: {result['error']}"
+    if name == "load_cost_sheet":
+        return f"{len(result['rows'])} rows"
+    if name == "calc_margins":
+        return f"totals {short(result['totals'])}"
+    if name == "get_comparables":
+        return f"{result['category']}: n={result['n']} low={result['low']} median={result['median']} high={result['high']}"
+    if name == "evaluate_pricing_rules":
+        counts: dict[str, int] = {}
+        for d in result["decisions"]:
+            counts[d["action"]] = counts.get(d["action"], 0) + 1
+        return f"{counts} reprice={short(result['reprice_prices'])}"
+    if name == "apply_price_changes":
+        extra = f", applied_totals {short(result['applied_totals'])}" if "applied_totals" in result else ""
+        return f"applied {len(result['applied'])}, rejected {len(result['rejected'])}{extra}"
+    return short(result)
+
+
+async def execute_tool(
+    name: str | None,
+    args: dict[str, Any],
+    approved: dict[tuple[str, float], bool] | None,
+) -> dict[str, Any]:
+    try:
+        if name == "load_cost_sheet":
+            return {"rows": load_cost_sheet()}
+        if name == "calc_margins":
+            return calc_margins(args)
+        if name == "get_comparables":
+            return get_comparables(args)
+        if name == "evaluate_pricing_rules":
+            return evaluate_pricing_rules(args)
+        if name == "get_store_prices":
+            return read_prices()
+        if name == "apply_price_changes":
+            changes = parse_changes(args)
+            if approved is None:
+                # No approval event seen for this call: review locally before writing.
+                approved = await review_changes(changes)
+            raw = json.loads(args) if isinstance(args, str) else args
+            result = run_apply_price_changes(changes, approved, raw.get("scenario"))
+            for row in result["applied"]:
+                print(f"  [wrote]   {row['sku']}: {fmt(row['old_price'])} -> {fmt(row['new_price'])}")
+            for row in result["rejected"]:
+                print(f"  [skipped] {row['sku']} -> {fmt(row['new_price'])} ({row['status']})")
+            return result
+        return {"error": f"unknown tool {name}"}
+    except Exception as exc:  # report tool failures back to the model
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+# ---------- agent lifecycle ----------
+
+def config_fingerprint() -> str:
+    return hashlib.sha256(json.dumps(AGENT_CONFIG, sort_keys=True).encode()).hexdigest()
+
+
+async def get_or_create_agent(client: ZooworkClient) -> str:
+    fingerprint = config_fingerprint()
+
+    if AGENT_ID_FILE.exists():
+        agent_id = AGENT_ID_FILE.read_text().strip()
+        stored = CONFIG_HASH_FILE.read_text().strip() if CONFIG_HASH_FILE.exists() else ""
+        if stored != fingerprint:
+            # Push the tools, approval policy and instructions only when they changed.
+            await client.update_agent(agent_id, AGENT_CONFIG)
+            CONFIG_HASH_FILE.write_text(fingerprint + "\n")
+            trace("agent.config_updated", agent_id)
+        return agent_id
+
+    models = await client.list_models()
+    selectable = [m for m in models if m.get("selectable") is not False]
+    if not selectable:
+        raise RuntimeError("No selectable ZooWork model")
+    chosen = next(
+        (m for m in selectable if "model" in (m.get("default_for") or [])), selectable[0]
+    )
+    resource = {"name": "marginguard", "model": {"primary": chosen["model"]}, **AGENT_CONFIG}
+    created = await client.create_agent(resource, idempotency_key="marginguard-agent-v1")
+    agent_id = created["agent_id"]
+    AGENT_ID_FILE.write_text(agent_id + "\n")
+    CONFIG_HASH_FILE.write_text(fingerprint + "\n")
+    trace("agent.created", f"{agent_id} model={chosen['model']}")
+    return agent_id
+
+
+# ---------- event loop ----------
+
+def trace_event(event: SessionEvent) -> None:
+    p = event.payload
+    kind = event.event_type
+    if kind == "run.started":
+        trace("run.started", event.run_id or "")
+    elif kind == "agent.tool":
+        tc = tool_call(event)
+        if tc is None:
+            return
+        if tc.phase == "start":
+            trace("tool.start", f"{tc.tool_name} {short(tc.args or {})}")
+        elif tc.phase == "end":
+            trace("tool.end", f"{tc.tool_name}{' (error)' if tc.is_error else ''}")
+        else:
+            trace("tool.blocked", f"{tc.tool_name} reason={p.get('deniedReason')}")
+    elif kind == "agent.custom_tool_use":
+        call = custom_tool_use(event)
+        if call is None:
+            return
+        if call.phase == "requested":
+            trace("custom_tool.requested", f"{call.name} {short(call.input or {})}")
+        else:
+            trace("custom_tool.resolved", f"{call.name or call.call_id} outcome={call.outcome}")
+    elif kind == "agent.approval":
+        if p.get("phase") == "requested":
+            trace("approval.requested", f"{p.get('toolName')} approval={p.get('approvalId')}")
+        else:
+            trace("approval.resolved", f"{p.get('toolName') or ''} resolution={p.get('resolution')}")
+    elif kind == "agent.error":
+        trace("agent.error", short(p.get("errorMessage") or p))
+    elif kind == "agent.assistant":
+        text = assistant_text(event).strip()
+        if text:
+            trace("assistant", "")
+            print("\n" + text + "\n", flush=True)
+    elif kind == "run.finished":
+        trace("run.finished", f"outcome={run_outcome(event)}")
+
+
+async def run_turn(client: ZooworkClient, agent_id: str, message: str) -> None:
+    session = await client.create_session(
+        agent_id, {"initial_events": [{"type": "user.message", "content": message}]}
+    )
+    session_id = session["session_id"]
+    trace("session.created", session_id)
+    trace("user.message", message)
+
+    # Reviewer decisions per tool call, keyed by toolCallId.
+    decisions_by_call: dict[str, dict[tuple[str, float], bool]] = {}
+
+    async for event in client.stream_events(agent_id, session_id):
+        trace_event(event)
+        p = event.payload
+
+        if event.event_type == "agent.approval" and p.get("phase") == "requested":
+            if p.get("toolName") != "apply_price_changes":
+                # Nothing else is configured to ask; deny anything unexpected.
+                await client.resolve_approval(
+                    agent_id, p["approvalId"], decision="deny", resolved_by="marginguard"
+                )
+                continue
+            decisions = await review_changes(parse_changes(p.get("arguments")))
+            decisions_by_call[p.get("toolCallId") or ""] = decisions
+            decision = "allow-once" if any(decisions.values()) else "deny"
+            await client.resolve_approval(
+                agent_id, p["approvalId"], decision=decision, resolved_by="terminal-operator"
+            )
+
+        call = custom_tool_use(event)
+        if call is not None and call.phase == "requested":
+            approved = decisions_by_call.get(call.tool_call_id or "")
+            result = await execute_tool(call.name, call.input or {}, approved)
+            trace("local.result", f"{call.name}: {summarize_result(call.name or '', result)}")
+            await client.resolve_custom_tool_call(
+                agent_id,
+                call.call_id,
+                content=[{"type": "json", "value": result}],
+                is_error="error" in result,
+                resolved_by="marginguard",
+            )
+
+        if is_run_finished(event):
+            outcome = run_outcome(event)
+            if outcome != "succeeded":
+                raise RuntimeError(f"Run ended with outcome: {outcome}")
+            break
+
+
+async def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the MarginGuard pricing agent.")
+    parser.add_argument(
+        "--reset", action="store_true",
+        help="copy data/store_prices.original.json over data/store_prices.json first",
+    )
+    parser.add_argument("message", nargs="*", help="request for the agent")
+    opts = parser.parse_args()
+
+    if opts.reset:
+        shutil.copyfile(ORIGINAL_PRICES_FILE, PRICES_FILE)
+        trace("prices.reset", f"{ORIGINAL_PRICES_FILE.name} -> {PRICES_FILE.name}")
+
+    message = " ".join(opts.message).strip() or input("Message for the agent: ").strip()
+    async with create_zoowork_client() as client:
+        agent_id = await get_or_create_agent(client)
+        await client.start_agent(agent_id)
+        await client.wait_until_running(agent_id, timeout=120)
+        await run_turn(client, agent_id, message)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

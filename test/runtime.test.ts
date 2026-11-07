@@ -42,8 +42,8 @@ function fakeAgents() {
 
 async function project() {
   const cwd = await mkdtemp(join(tmpdir(), "starter-runtime-"));
-  await mkdir(join(cwd, "agent"));
-  const writeAgent = (thinking?: string) => writeFile(join(cwd, "agent", "agent.md"), agentMd(thinking));
+  await mkdir(join(cwd, "agent_starter"));
+  const writeAgent = (thinking?: string) => writeFile(join(cwd, "agent_starter", "agent.md"), agentMd(thinking));
   const definition = () => loadAgentDefinition(cwd).resource as AgentResource;
   return { cwd, writeAgent, definition };
 }

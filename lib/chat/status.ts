@@ -66,7 +66,7 @@ export function agentPill(check: StatusCheck): Pill {
       return {
         tone: "warn",
         label: "Agent out of date",
-        detail: "The Agent on ZooWork Platform does not match agent/agent.md. Run npm run setup.",
+        detail: "The Agent on ZooWork Platform does not match agent_starter/agent.md. Run npm run setup.",
       };
     case "not_running":
       return { tone: "warn", label: "Agent stopped", detail: "The Agent is not running. Run npm run setup." };
