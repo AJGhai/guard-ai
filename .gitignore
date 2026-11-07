@@ -35,7 +35,11 @@ agent/.negotiator_config_hash
 data/outbox/
 agent/.rfq_agent_id
 agent/.rfq_config_hash
+# Fetched review and listing text (third-party content): stays on each machine
+market/cache/reviews/
+market/cache/listings/
 agent/.photo_agent_id
 agent/.photo_config_hash
 agent/.sketch_agent_id
 agent/.sketch_config_hash
+market/cache/demo_run.json

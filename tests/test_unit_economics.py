@@ -47,6 +47,12 @@ class UnitEconomics(unittest.TestCase):
     def test_impossible_target_returns_none(self):
         self.assertIsNone(price_to_hold_margin(BASE, 0.80))
 
+    def test_breakeven_price_lift_leaves_profit_unchanged(self):
+        from tools.unit_economics import breakeven_price_lift
+        lift = breakeven_price_lift(BASE, 1.0)
+        after = compute(apply_changes(BASE, 1.0, lift))
+        self.assertAlmostEqual(after["profit"], compute(BASE)["profit"])
+
     def test_apply_changes(self):
         r = compute(apply_changes(BASE, 1.0, 3.0))
         self.assertAlmostEqual(r["price"], 43)

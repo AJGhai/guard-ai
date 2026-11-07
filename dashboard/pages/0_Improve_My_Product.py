@@ -37,6 +37,8 @@ from agent.sketch import draw_improved  # noqa: E402
 from agent.sourcing import run_sourcing  # noqa: E402
 from tools.annotate import annotate  # noqa: E402
 from tools.improve import auto_select, run_pipeline  # noqa: E402
+from tools.demo_store import DEMO_FILE, load_run, save_run  # noqa: E402
+from tools.unit_economics import breakeven_price_lift  # noqa: E402
 from tools.rfq import VENDORS, build_po, evaluate, po_text, reference_cost, write_po  # noqa: E402
 from tools.spec_sheet import build_spec_sheet, data_uri, pinned_photo_html, sample_photo  # noqa: E402
 from tools.unit_economics import EVENTS, Inputs, apply_changes, apply_event, compute  # noqa: E402
@@ -164,11 +166,26 @@ ready = {"link": bool(link.strip()), "photo": bool(photo_bytes), "description": 
 basis = hashlib.sha256(photo_bytes or (link + description).encode()).hexdigest()[:16]
 run_key = (mode, basis, tuple(complaints))
 
-b1, b2, _ = st.columns([1, 1.3, 2])
+b1, b2, b3 = st.columns([1, 1.3, 1.2])
 analyze_clicked = b1.button("Analyze", type="primary", disabled=not ready, width="stretch")
 autopilot_clicked = b2.button("🚀 Autopilot to purchase order", disabled=not ready, width="stretch")
+instant_clicked = b3.button("⚡ Instant demo", disabled=not DEMO_FILE.exists(), width="stretch",
+                            help="Replays a recorded real run in under a second. Save one with the button below a result.")
 st.caption("Autopilot runs every step, picks the improvements, gets supplier quotes and drafts the order. "
-           "It stops only for your approval. About 90 seconds.")
+           "It stops only for your approval. About a minute. **Instant demo** replays a recorded run.")
+
+if instant_clicked:
+    saved = load_run()
+    recorded = {**saved["state"], "key": run_key, "recorded": True}
+    st.session_state["improve"] = recorded
+    for k in ("rfq_context", "rfq_result"):
+        if saved.get(k) is not None:
+            st.session_state[k] = saved[k]
+    st.session_state.pop("po_saved", None)
+    recorded_price = (recorded.get("listing") or {}).get("price")
+    if recorded_price and abs(recorded_price - price) > 0.005:
+        st.session_state["pending_price"] = float(recorded_price)
+        st.rerun()
 
 
 def run_analysis(status: Any) -> dict[str, Any] | None:
@@ -241,8 +258,14 @@ state = st.session_state.get("improve")
 if not state:
     st.info("Paste your listing link (or pick a photo) and press **Analyze**, or let **Autopilot** run every step.")
     st.stop()
-if state["key"] != run_key:
+if state.get("recorded"):
+    st.markdown('<span class="badge badge-sample">RECORDED RUN</span> '
+                '<span class="subtle">A saved real run, replayed instantly.</span>', unsafe_allow_html=True)
+elif state["key"] != run_key:
     st.caption("Inputs changed since the last run. Press **Analyze** to refresh.")
+if not state.get("recorded") and st.button("💾 Save this run as the instant demo", key="record_demo"):
+    save_run(state, st.session_state.get("rfq_context"), st.session_state.get("rfq_result"))
+    st.success("Saved on this machine. Next time, press Instant demo.")
 
 spec: dict[str, Any] = state["spec"]
 market: dict[str, Any] = state["market"]
@@ -394,6 +417,30 @@ with right:
 # ---------- 6. improve it ----------
 
 st.markdown("### 6. Improve it")
+evidence: dict[str, Any] | None = state.get("evidence")
+if evidence:
+    st.markdown(
+        f"**Backed by real reviews.** Read {evidence['n_low']} low-star (1 to 3) and {evidence['n_high']} high-star "
+        f"reviews, the most helpful first, across: {', '.join(s['name'] for s in evidence['sources'])}."
+    )
+    ev1, ev2 = st.columns([3, 2], gap="large")
+    with ev1:
+        st.dataframe(
+            pd.DataFrame(
+                [{"Theme": t["name"], "Type": t["kind"], "Reviews": t["count"], "Share of low-star": t["share"],
+                  "Avg rating": t["avg_rating"]} for t in evidence["themes"][:8]]
+            ).style.format({"Share of low-star": "{:.0%}", "Avg rating": "{:.1f}"}),
+            width="stretch", hide_index=True, height=318,
+        )
+    with ev2:
+        st.markdown("**What buyers like (keep this)**")
+        st.markdown("<span class='subtle'>" + html.escape(", ".join(p["name"] for p in evidence["positives"][:6]) or "n/a")
+                    + "</span>", unsafe_allow_html=True)
+        st.caption("Themes are ZooData's AI tags on each review. Counts are reviews mentioning the theme, computed in code. "
+                   "The agent can only cite themes and reviews that exist here.")
+    grounded_note = (state.get("grounded") or {}).get("note")
+    if grounded_note:
+        st.warning(grounded_note)
 st.caption("Cost and price effects are the agent's estimates. Tick the changes to price in."
            + (" Autopilot picked the ticked ones." if auto else ""))
 auto_picked = set((auto or {}).get("picked") or [])
@@ -409,6 +456,21 @@ for i, imp in enumerate(spec["improvements"], 1):
             f"+{money(imp['price_delta'])} price ({imp['confidence']} confidence). Risk: {html.escape(imp['risk'])}</span>",
             unsafe_allow_html=True,
         )
+        sup = imp.get("support")
+        if sup and evidence:
+            st.markdown(
+                f"<span class='subtle'><b>Backed by {sup['count']} of {sup['of']} low-star reviews "
+                f"({sup['share']:.0%}), avg {sup['avg_rating']} stars.</b> Breaks even at "
+                f"+{money(breakeven_price_lift(after_event, imp['unit_cost_delta']))} price.</span>",
+                unsafe_allow_html=True,
+            )
+            with st.expander(f"Read the reviews behind change {i}"):
+                for rid in (imp.get("review_ids") or sup["review_ids"])[:3]:
+                    r = evidence["reviews"][rid]
+                    st.markdown(
+                        f"> {r['text']}\n>\n> *{r['rating']:.0f} stars, {r['helpful']} found helpful"
+                        f"{', verified purchase' if r['verified'] else ''}, on {r['competitor']} ({rid})*"
+                    )
     if on:
         selected.append({**imp, "n": i})
 base_e = compute(after_event)

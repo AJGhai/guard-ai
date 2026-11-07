@@ -93,6 +93,12 @@ def supplier_cost_to_hold_margin(i: Inputs, target_margin: float) -> float | Non
     return cost if cost > 0 else None
 
 
+def breakeven_price_lift(i: Inputs, cost_delta: float) -> float:
+    """Extra price per unit that exactly pays for an extra supplier cost (duty included)."""
+    share = 1 - i.referral_rate - i.ad_rate
+    return cost_delta * (1 + i.duty_rate) / share if share > 0 else float("inf")
+
+
 def apply_changes(i: Inputs, cost_delta: float, price_delta: float) -> Inputs:
     """A product change: costs more to make (cost_delta), sells for more (price_delta)."""
     return replace(i, supplier_cost=i.supplier_cost + cost_delta, price=i.price + price_delta)

@@ -168,7 +168,7 @@ class PipelineTests(unittest.TestCase):
     def setUp(self):
         self.saved = {k: getattr(imp, k) for k in
                       ("get_listing", "own_reviews", "analyze_photo", "market_picture", "review_themes",
-                       "compare_with_competitors", "fetch_image")}
+                       "compare_with_competitors", "fetch_image", "gather_reviews", "advise_evidence")}
 
     def tearDown(self):
         for k, v in self.saved.items():
@@ -195,14 +195,42 @@ class PipelineTests(unittest.TestCase):
             seen["you"] = you
             return {"doing_well": [], "room_to_improve": [], "source": "zoowork_agent"}
         imp.compare_with_competitors = compare
+        imp.gather_reviews = lambda asins: {}                           # no network; too little evidence
         steps = []
         out = imp.run_pipeline("link", link="https://www.amazon.com/dp/B0ABCDEF12", on_step=steps.append)
         self.assertEqual(seen["jpeg"], b"jpeg")
         self.assertEqual(seen["context"]["own_review_themes"]["issues"][0]["element"], "runs small")
         self.assertEqual(seen["comp_asins"], ["C1"])                    # own ASIN excluded
         self.assertEqual(seen["you"]["price"], 27.99)                   # listing price wins
-        self.assertEqual(len(steps), 7)
+        self.assertEqual(len(steps), 8)                                 # includes the review-evidence step
+        self.assertIsNone(out["grounded"])                              # too few reviews: keeps the photo agent's changes
         self.assertEqual(out["terms"], "linen pants")
+
+    def test_evidence_step_replaces_improvements_with_cited_ones(self):
+        imp.get_listing = lambda asin: {"source": "live_zoodata", "asin": asin, "title": "Linen pants", "price": 27.99,
+                                        "rating": 4.1, "rating_count": 812, "image": "u", "features": []}
+        imp.own_reviews = lambda asin: {"issues": [], "positives": []}
+        imp.fetch_image = lambda url: b"jpeg"
+        imp.analyze_photo = lambda *a: {**ps.SAMPLE_SPEC, "search_terms": "linen pants"}
+        imp.market_picture = lambda terms: {"source": "live_zoodata", "n": 1, "price": {"median": 29.99},
+                                            "avg_rating": 4.3, "listings": [{"asin": "C1", "monthly_sales_floor": 5}]}
+        imp.review_themes = lambda asins, sample=None: {"positives": [], "issues": []}
+        imp.compare_with_competitors = lambda you, comps, market: {"doing_well": [], "room_to_improve": [], "source": "zoowork_agent"}
+
+        def low(n):
+            return {"title": "t", "body": f"too thin {n}", "rating": 2, "helpful": n, "verified": True, "date": None,
+                    "summary": None, "tags": [["mentioned_issues", "Thin Material"]]}
+        imp.gather_reviews = lambda asins: {a: {"low": [low(i) for i in range(6)], "high": []} for a in asins}
+        imp.advise_evidence = lambda product, evidence, econ, market: {
+            "source": "zoowork_agent", "summary": "s",
+            "improvements": [{"title": "Add lining", "observation": "Fabric is too thin", "region": "lower_body",
+                              "unit_cost_delta": 0.8, "price_delta": 2.0, "confidence": "high", "risk": "r",
+                              "supplier_ask": "a", "themes": ["Thin Material"], "review_ids": ["R1"],
+                              "support": {"count": 6, "of": 12, "share": 0.5, "avg_rating": 2.0, "review_ids": ["R1"]}}]}
+        out = imp.run_pipeline("link", link="https://www.amazon.com/dp/B0ABCDEF12")
+        self.assertEqual([i["title"] for i in out["spec"]["improvements"]], ["Add lining"])
+        self.assertEqual(out["spec"]["improvements"][0]["fixes"], "Fabric is too thin")
+        self.assertEqual(out["evidence"]["n_low"], 12)                  # own listing + one competitor, 6 each
 
     def test_link_without_asin_is_a_clear_error(self):
         with self.assertRaises(ValueError):
