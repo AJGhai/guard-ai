@@ -365,7 +365,10 @@ Open http://localhost:8501, set the duty scenario in the sidebar and press **Run
 sends the scenario to `POST /run` with `reset: true` (store prices restored, outbox cleared). The
 page polls the API every 1.5 seconds and shows:
 
-- **Agent activity**: each tool call by MarginGuard and SupplierNegotiator with its status.
+- **Agent activity**: every step of the run in order, newest at the bottom: each tool call by
+  MarginGuard or SupplierNegotiator with its status, the `load_cost_sheet` and `calc_margins` steps
+  run inside `evaluate_pricing_rules` and `apply_price_changes`, prices written, emails filed, and
+  the reports. "Not started" before the first run.
 - **Approvals**: the pending price changes or supplier email drafts, each with an approve/reject
   toggle, and one submit button (`POST /approve`).
 - **KPIs, pricing decisions and margin chart** from `GET /plan` (margins today, under the tariff
@@ -389,7 +392,7 @@ use the starter app's shape, `{"error": "<code>"}`.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/run` | Start a run. Body `{"request": "...", "reset": false}`. `202`; `409 run_in_progress` if one is running. |
-| GET | `/events?since=0` | Event trace from index `since`; `next` is the index to poll from next. |
+| GET | `/events?since=0` | Event trace from index `since`; `next` is the index to poll from next. Before the first run: `200` with `status: "not_started"` and no events. |
 | GET | `/pending` | The price changes or supplier email drafts waiting for a decision, if any. |
 | POST | `/approve` | Decide every pending item. Body `{"decisions": {"<sku>": true\|false}}`. |
 | GET | `/plan` | Per-SKU decisions and margins, comparables, baseline, scenario and applied totals, `data_source` (fills in as the run goes). |

@@ -977,6 +977,11 @@ class MarginGuardRun(AgentSession):
             }
             self.plan["scenario"] = {"input": result["plan_input"], "totals": result["plan_totals"]}
             self.plan["skus"] = self._sku_margins(duties, result["plan_input"])
+            # The tool runs these locally; trace them so the activity view shows each step.
+            parent = "inside evaluate_pricing_rules"
+            self.trace("local.step", f"load_cost_sheet: {len(result['decisions'])} SKUs at the run's starting prices ({parent})")
+            self.trace("local.step", f"calc_margins: baseline totals {short(result['baseline_totals'])} ({parent})")
+            self.trace("local.step", f"calc_margins: plan totals {short(result['plan_totals'])} ({parent})")
             return result
         if name == "get_store_prices":
             return read_prices()
@@ -993,6 +998,11 @@ class MarginGuardRun(AgentSession):
             for row in result["rejected"]:
                 self.trace("price.skipped", f"{row['sku']} -> {fmt(row['new_price'])} ({row['status']})")
             self.apply_result = result
+            if "applied_totals" in result:
+                self.trace(
+                    "local.step",
+                    f"calc_margins: applied totals {short(result['applied_totals'])} (inside apply_price_changes)",
+                )
             if args.get("scenario"):
                 after = calc_margins(
                     {**args["scenario"], "prices": {r["sku"]: r["new_price"] for r in result["applied"]}},

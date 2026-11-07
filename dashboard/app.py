@@ -11,6 +11,7 @@ Set MARGINGUARD_API to use an API somewhere other than http://127.0.0.1:8000.
 
 from __future__ import annotations
 
+import html
 import os
 import sys
 from pathlib import Path
@@ -60,6 +61,19 @@ st.markdown(
       .badge-sample {{ background: rgba(245,166,35,.12); color: {AMBER}; border: 1px solid {AMBER}; }}
       .badge-idle {{ background: rgba(107,119,133,.15); color: {GREY}; border: 1px solid {GREY}; }}
       .subtle {{ color: {GREY}; font-size: 0.85rem; }}
+      .badges {{ margin: 0.2rem 0 1rem; display: flex; gap: 8px; flex-wrap: wrap; }}
+      table.act {{ width: 100%; border-collapse: collapse; font-size: 0.78rem; table-layout: fixed; }}
+      table.act th {{ color: {GREY}; text-align: left; font-weight: 600; padding: 4px 6px;
+        border-bottom: 1px solid #1e2a3a; }}
+      table.act td {{ padding: 6px; border-top: 1px solid #1e2a3a; vertical-align: top;
+        overflow-wrap: anywhere; word-break: break-word; }}
+      table.act td.t {{ color: {GREY}; white-space: nowrap; }}
+      table.act .who {{ display: block; font-size: 0.68rem; letter-spacing: 0.03em; }}
+      table.act .who-MarginGuard {{ color: {GREEN}; }}
+      table.act .who-SupplierNegotiator {{ color: #8ab4f8; }}
+      table.act .detail {{ color: {GREY}; display: block; margin-top: 2px; }}
+      .not-started {{ border: 1px dashed #1e2a3a; border-radius: 8px; padding: 18px; color: {GREY};
+        text-align: center; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -93,49 +107,81 @@ def money(x: float | None) -> str:
     return "–" if x is None else f"${x:,.0f}"
 
 
-def pts(a: float | None, b: float | None, label: str) -> str | None:
-    return None if a is None or b is None else f"{(a - b) * 100:+.1f} pts {label}"
+def pts(a: float | None, b: float | None) -> str | None:
+    return None if a is None or b is None else f"{(a - b) * 100:+.1f} pts"
 
 
 # ---------- activity ----------
 
-def activity_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One row per tool call, with its latest status, built from the run's event trace."""
+def timeline(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every step of the run in order, newest last. A tool call's start, approval and result are
+    merged into one row whose status updates; bookkeeping events (tool.end, custom_tool.*) are
+    left out because the merged row already covers them."""
     rows: list[dict[str, Any]] = []
 
-    def find(agent: str, tool: str, statuses: tuple[str, ...]) -> dict[str, Any] | None:
+    def add(t: float, who: str, step: str, detail: str = "", status: str = "", call: bool = False) -> None:
+        rows.append({"t": t, "who": who, "step": step, "detail": detail, "status": status, "call": call})
+
+    def open_call(who: str, tool: str, statuses: tuple[str, ...]) -> dict[str, Any] | None:
         return next(
-            (r for r in rows if r["agent"] == agent and r["tool"] == tool and r["status"] in statuses),
+            (r for r in rows if r["call"] and r["who"] == who and r["step"] == tool and r["status"] in statuses),
             None,
         )
 
     for e in events:
-        label, detail = e["label"], e["detail"]
-        agent = "SupplierNegotiator" if label.startswith("negotiator.") else "MarginGuard"
+        label, detail, t = e["label"], e["detail"], e["t"]
+        who = "SupplierNegotiator" if label.startswith("negotiator.") else "MarginGuard"
         kind = label.removeprefix("negotiator.")
         if kind == "tool.start":
             tool, _, args = detail.partition(" ")
-            rows.append({"t": e["t"], "agent": agent, "tool": tool, "status": "running", "detail": args})
+            add(t, who, tool, args, "running", call=True)
         elif kind == "local.result":
             tool, _, summary = detail.partition(": ")
-            row = find(agent, tool, ("running", "awaiting approval", "approved"))
+            row = open_call(who, tool, ("running", "awaiting approval", "approved"))
+            status = "error" if summary.startswith("error") else "done"
             if row:
-                row["status"] = "error" if summary.startswith("error") else "done"
-                row["detail"] = summary
+                row["status"], row["detail"] = status, summary
+            else:
+                add(t, who, tool, summary, status, call=True)
+        elif kind == "local.step":
+            tool, _, rest = detail.partition(": ")
+            add(t, who, tool, rest, "done")
         elif kind == "approval.requested":
-            row = find(agent, detail.split(" ")[0], ("running",))
+            row = open_call(who, detail.split(" ")[0], ("running",))
             if row:
                 row["status"] = "awaiting approval"
         elif kind == "approval.resolved":
-            row = find(agent, detail.split(" ")[0], ("awaiting approval",)) if detail.split(" ")[0] else None
-            row = row or next((r for r in reversed(rows) if r["agent"] == agent and r["status"] == "awaiting approval"), None)
+            row = next((r for r in reversed(rows) if r["who"] == who and r["status"] == "awaiting approval"), None)
             if row:
-                row["status"] = "rejected" if "deny" in detail else "approved"
+                row["status"] = "rejected" if "resolution=deny" in detail else "approved"
         elif kind == "tool.blocked":
-            row = find(agent, detail.split(" ")[0], ("running", "awaiting approval"))
+            row = open_call(who, detail.split(" ")[0], ("running", "awaiting approval"))
             if row:
                 row["status"] = "rejected" if "approval-denied" in detail else "blocked"
-                row["detail"] = detail
+        elif kind == "prices.reset":
+            add(t, who, "reset", detail, "done")
+        elif kind == "prices.snapshot":
+            add(t, who, "price snapshot", detail, "done")
+        elif kind.startswith("agent.") and kind != "agent.error":
+            add(t, who, kind.replace("agent.", "agent ").replace("_", " "), detail, "done")
+        elif kind == "session.created":
+            add(t, who, "session started", detail, "done")
+        elif kind == "user.message":
+            add(t, who, "request" if who == "MarginGuard" else "hand-off from MarginGuard", detail)
+        elif kind == "price.written":
+            add(t, who, "price written", detail, "done")
+        elif kind == "price.skipped":
+            add(t, who, "price not written", detail, "rejected")
+        elif kind == "email.outbox":
+            add(t, who, "email to outbox", detail, "done")
+        elif kind == "email.skipped":
+            add(t, who, "email not written", detail, "rejected")
+        elif kind == "assistant":
+            add(t, who, "report" if who == "MarginGuard" else "summary", detail, "done")
+        elif kind == "run.finished":
+            add(t, who, "run finished", detail, "done" if "succeeded" in detail else "error")
+        elif kind in ("run.failed", "agent.error", "stream.reconnect", "approval.timeout"):
+            add(t, who, kind, detail, "error")
     return rows
 
 
@@ -169,12 +215,15 @@ with st.sidebar:
 @st.fragment(run_every=POLL_SECONDS)
 def live() -> None:
     events_data, events_err = api("GET", "/events")
-    if events_err == "no_run":
-        header(None, None)
-        st.info("No run yet. Pick a duty scenario and press **Run MarginGuard**.")
-        return
     if events_err:
         st.error(events_err)
+        return
+    if events_data["status"] == "not_started":
+        header(None, None)
+        if flash := st.session_state.pop("flash", None):
+            getattr(st, flash[0])(flash[1])
+        st.info("No run yet. Pick a duty scenario and press **Run MarginGuard**.")
+        agent_activity([], "not_started")
         return
 
     pending, _ = api("GET", "/pending")
@@ -201,7 +250,7 @@ def live() -> None:
         decisions_table(plan)
         margin_chart(plan)
     with right:
-        agent_activity(events_data["events"])
+        agent_activity(events_data["events"], status)
         supplier_outbox(outbox or {})
     if report:
         with st.expander("Agent report", expanded=status == "succeeded"):
@@ -212,20 +261,27 @@ def header(status: str | None, source: str | None) -> None:
     left, right = st.columns([3, 2])
     with left:
         st.markdown("## MarginGuard")
+    with right:
+        state = status.replace("_", " ") if status else "not started"
         st.markdown(
-            '<span class="subtle">Tariff-aware pricing for fashion merchants, run by the MarginGuard '
-            "ZooWork agent. A person approves every price change and supplier email.</span>",
+            f"<div style='text-align:right; margin-top:1.4rem' class='subtle'>Run status: {state}</div>",
             unsafe_allow_html=True,
         )
-    with right:
-        if source == "live_zoodata":
-            badge = '<span class="badge badge-live">LIVE ZOODATA</span>'
-        elif source:
-            badge = '<span class="badge badge-sample">SAMPLE</span> <span class="subtle">market/fallback_prices.json</span>'
-        else:
-            badge = '<span class="badge badge-idle">NO DATA YET</span>'
-        state = f'<br><span class="subtle">Run status: {status.replace("_", " ")}</span>' if status else ""
-        st.markdown(f"<div style='text-align:right; margin-top:1.4rem'>{badge}{state}</div>", unsafe_allow_html=True)
+    st.markdown(
+        '<span class="subtle">Tariff-aware pricing for fashion merchants, run by the MarginGuard '
+        "ZooWork agent. A person approves every price change and supplier email.</span>",
+        unsafe_allow_html=True,
+    )
+    if source == "live_zoodata":
+        data_badge = '<span class="badge badge-live">LIVE ZOODATA</span>'
+    elif source:
+        data_badge = '<span class="badge badge-sample">SAMPLE COMPARABLES</span>'
+    else:
+        data_badge = '<span class="badge badge-idle">NO MARKET DATA YET</span>'
+    st.markdown(
+        f'<div class="badges">{data_badge}<span class="badge badge-sample">SAMPLE MERCHANT DATA</span></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def kpis(plan: dict[str, Any]) -> None:
@@ -234,16 +290,18 @@ def kpis(plan: dict[str, Any]) -> None:
     applied = plan.get("applied_totals")
     today = plan.get("blended_margin_today")
     tariff = baseline.get("blended_margin")
+    with_plan = applied["blended_margin"] if applied else proposed.get("blended_margin")
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Duty exposure / mo", money(baseline.get("exposure")))
+    k1.metric("Exposure / mo", money(baseline.get("exposure")))
     k2.metric("Margin today", pct(today))
-    k3.metric("Margin, tariff", pct(tariff), pts(tariff, today, "vs today"))
+    k3.metric("Margin w/ tariff", pct(tariff), pts(tariff, today))
+    k4.metric("Margin w/ plan", pct(with_plan), pts(with_plan, tariff))
     if applied:
-        k4.metric("Margin, approved", pct(applied["blended_margin"]), pts(applied["blended_margin"], tariff, "vs tariff"))
-        k5.metric("Recovery / mo", money(applied["recovery"]), f"plan {money(proposed.get('recovery'))}", delta_color="off")
+        k5.metric("Recovery / mo", money(applied["recovery"]), f"plan {money(proposed.get('recovery'))}",
+                  delta_color="off", delta_arrow="off")
     else:
-        k4.metric("Margin, proposed", pct(proposed.get("blended_margin")), pts(proposed.get("blended_margin"), tariff, "vs tariff"))
-        k5.metric("Recovery / mo (proposed)", money(proposed.get("recovery")), "awaiting approval" if proposed else None, delta_color="off")
+        k5.metric("Recovery / mo", money(proposed.get("recovery")), "pending approval" if proposed else None,
+                  delta_color="off", delta_arrow="off")
 
 
 def approvals(pending: dict[str, Any], session: str) -> None:
@@ -357,26 +415,40 @@ def margin_chart(plan: dict[str, Any]) -> None:
     st.caption(f"Dashed line: {REVIEW_MARGIN:.0%} sourcing-review threshold.")
 
 
-def agent_activity(events: list[dict[str, Any]]) -> None:
+def agent_activity(events: list[dict[str, Any]], status: str) -> None:
     st.markdown("### Agent activity")
-    rows = activity_rows(events)
+    if status == "not_started":
+        st.markdown('<div class="not-started">Not started</div>', unsafe_allow_html=True)
+        return
+    rows = timeline(events)
     if not rows:
-        st.caption("Waiting for the agent's first tool call…")
-    else:
-        st.table(
-            pd.DataFrame([
-                {
-                    "t (s)": f"{r['t']:.1f}",
-                    "Status": STATUS_ICONS.get(r["status"], r["status"]),
-                    "Tool": TOOL_LABELS.get(r["tool"], r["tool"]),
-                    "Agent": "Negotiator" if r["agent"] == "SupplierNegotiator" else r["agent"],
-                }
-                for r in rows
-            ]).set_index("t (s)")
-        )
-    st.caption("Tool arguments and results are in the event log.")
-    with st.expander("Event log"):
-        st.dataframe(pd.DataFrame(events[-40:]), width="stretch", hide_index=True)
+        st.caption("Waiting for the agent…")
+        return
+    body = "".join(
+        "<tr>"
+        f'<td class="t">{r["t"]:.1f}s</td>'
+        f'<td><span class="who who-{r["who"]}">{html.escape(r["who"])}</span>'
+        f"<b>{html.escape(TOOL_LABELS.get(r['step'], r['step']))}</b>"
+        + (f'<span class="detail">{html.escape(clip(r["detail"]))}</span>' if r["detail"] else "")
+        + "</td>"
+        f"<td>{html.escape(STATUS_ICONS.get(r['status'], r['status']))}</td>"
+        "</tr>"
+        for r in rows
+    )
+    st.markdown(
+        '<table class="act"><colgroup><col style="width:3.6rem"><col><col style="width:7.5rem"></colgroup>'
+        "<thead><tr><th>t</th><th>Who · step</th><th>Status</th></tr></thead>"
+        f"<tbody>{body}</tbody></table>",
+        unsafe_allow_html=True,
+    )
+    with st.expander("Raw event log"):
+        st.dataframe(pd.DataFrame(events), width="stretch", hide_index=True)
+
+
+def clip(text: str, limit: int = 220) -> str:
+    """Shorten long tool arguments and summaries; names are never clipped."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def supplier_outbox(outbox: dict[str, Any]) -> None:
