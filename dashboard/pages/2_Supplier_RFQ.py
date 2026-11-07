@@ -144,7 +144,13 @@ duty_by_vendor = {v.key: float(duty_df.loc[i, "Assumed duty (%)"]) / 100 for i, 
 
 run_key = (product, tuple(c["title"] for c in changes), qty, deadline, use_agents)
 
-if st.button("Request quotes from three vendors", type="primary"):
+# Arriving from "Continue" on the Improve page starts the quotes right away, unless this same
+# request already has quotes (for example from the recorded demo).
+autostart = st.session_state.pop("rfq_autostart", False)
+_have = st.session_state.get("rfq_result")
+auto_run = autostart and not (_have and _have["key"] == run_key)
+
+if st.button("Request quotes from three vendors", type="primary") or auto_run:
     with st.status("Contacting vendors...", expanded=True) as status:
         def on_stage(label: str) -> None:
             status.update(label=label)

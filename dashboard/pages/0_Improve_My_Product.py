@@ -517,6 +517,28 @@ with bb2:
 st.caption("A tech-pack mockup: changed areas are marked and labelled on your photo (approximate), "
            "not a re-rendered photo.")
 
+# ---------- continue: from the chosen changes straight to supplier quotes ----------
+
+if selected:
+    st.markdown("---")
+    cc1, cc2 = st.columns([2, 3], vertical_alignment="center")
+    with cc1:
+        go_quotes = st.button(f"➡️ Continue: ask suppliers for quotes ({len(selected)} change{'s' if len(selected) != 1 else ''})",
+                              type="primary", key="continue_rfq", width="stretch")
+    with cc2:
+        st.caption("Your chosen changes carry over. Three simulated suppliers are messaged and quote them; "
+                   "then you compare landed cost and approve an order. Nothing is really sent.")
+    if go_quotes:
+        st.session_state["rfq_context"] = {
+            "keyword": spec["title"],
+            "changes": [{k: s[k] for k in ("title", "fixes", "unit_cost_delta", "price_delta", "supplier_ask")}
+                        for s in selected],
+            "inputs": asdict(after_event),
+            "price_add": price_add,
+        }
+        st.session_state["rfq_autostart"] = True   # the quotes page starts asking suppliers right away
+        st.switch_page("pages/2_Supplier_RFQ.py")
+
 # ---------- 7. where to source it ----------
 
 st.markdown("### 7. Where to source it")
