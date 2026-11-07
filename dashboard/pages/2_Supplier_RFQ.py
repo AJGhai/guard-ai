@@ -257,7 +257,9 @@ if cheapest_fob["vendor"] != best["vendor"]:
     )
 if result.get("summary"):
     st.markdown(
-        f"<span class='subtle'>Agent's summary (check it against the table): {html.escape(result['summary'])}</span>",
+        "<span class='subtle'>Agent's read of the chats, written before duty and your order size are counted, "
+        "so it can pick a different vendor. The recommendation above is the one to use: "
+        f"{html.escape(result['summary'])}</span>",
         unsafe_allow_html=True,
     )
 
