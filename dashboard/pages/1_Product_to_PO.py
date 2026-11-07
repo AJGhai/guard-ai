@@ -299,7 +299,10 @@ if advice and advice["key"] == advice_key:
                 f"- **{s['n']}. {s['title']}**: {s['fixes']}. +{money(s['unit_cost_delta'])} cost, "
                 f"+{money(s['price_delta'])} price."
             )
-        st.caption("The photo is the top competing listing, used as a stand-in for your product.")
+        st.caption(
+            "The photo is the top competing listing, used as a stand-in for your product. "
+            "Pin positions are approximate."
+        )
 
     # ---------- 5. draft request for quote ----------
     st.markdown("### 5. Draft request for supplier quotes")
